@@ -29,6 +29,8 @@ begin
 	using Plots
 	# Sintaxe matemática nos gráficos 
 	using LaTeXStrings
+	# Teste de performance
+	using BenchmarkTools
 end
 
 # ╔═╡ d0926a75-5e6f-4460-9cff-02d28c41be42
@@ -52,6 +54,7 @@ md"""
 
 # ╔═╡ 3864d806-f27c-4f3d-bdaa-7dae22556b19
 function GD(x⁰:: Array{<:Number}, r:: Function, f:: Function, ∇f:: Function, L:: Number, ftarget:: Number, kₘₐₓ:: Int64)
+	T = time()
 	xᵏ = x⁰
 	rᵏ = r(xᵏ) # Resíduo
 
@@ -72,7 +75,7 @@ function GD(x⁰:: Array{<:Number}, r:: Function, f:: Function, ∇f:: Function,
 		
 		# Critério de parada
 		if fxᵏ ≤ ftarget || k == kₘₐₓ
-			return xᵏ, fhist[1:k+1]
+			return xᵏ, fhist[1:k+1], time()-T
 		end
 				
 		k += 1
@@ -85,7 +88,8 @@ md"""
 """
 
 # ╔═╡ 610743bb-ce51-4cc7-b42f-3439cffaf595
-function CD(x⁰:: Array{<:Number}, r:: Function, f:: Function, ∇fᵢ:: Function, Lₘₐₓ:: Number, ftarget:: Number, kₘₐₓ:: Int64)
+function CD(x⁰:: Array{<:Number}, r:: Function, r!:: Function, f:: Function, ∇fᵢ:: Function, Lₘₐₓ:: Number, ftarget:: Number, kₘₐₓ:: Int64)
+	T = time()
 	xᵏ = copy(x⁰)
 	rᵏ = r(xᵏ) # Resíduo de x⁰
 
@@ -100,13 +104,13 @@ function CD(x⁰:: Array{<:Number}, r:: Function, f:: Function, ∇fᵢ:: Functi
 	while true	
 		for i = 1:n
 			# Escolha de randômica iₖ com distribuição uniforme
-			iₖ = rand(eachindex(xᵏ))
+			iₖ = rand(1:n)
 			# Cálculo do passo em iₖ
 			δ = -∇fᵢ(xᵏ, rᵏ, iₖ)/Lₘₐₓ
 			# Update da coordenada iₖ	
 			xᵏ[iₖ] += δ
 			# Update do resíduo
-			rᵏ = r(rᵏ, δ, iₖ)
+			r!(rᵏ, δ, iₖ)
 		end
 
 		# Update do histórico (só em iterações múltiplas de n)
@@ -114,8 +118,8 @@ function CD(x⁰:: Array{<:Number}, r:: Function, f:: Function, ∇fᵢ:: Functi
 		fhist[k+1] = fxᵏ
 
 		# Critério de parada
-		if fxᵏ ≤ ftarget || k == kₘₐₓ
-			return xᵏ, fhist[1:k+1]
+		if k == kₘₐₓ
+			return xᵏ, fhist[1:k+1], time()-T
 		end
 				
 		k += 1
@@ -154,20 +158,13 @@ begin
 	r(x:: Array{<:Number}; A=A, b=b) = A*x.-b
 	
 	# f e ∇f em função do resíduo
-	f(x:: Array{<:Number}, r:: Array{<:Number}; γ=γ) = (r'r+γ*(x'x))/2
+	f(x:: Array{<:Number}, r:: Array{<:Number}; γ=γ) = (norm(r)^2+γ*norm(x)^2)/2
 	∇f(x:: Array{<:Number}, r:: Array{<:Number}; A=A, γ=γ) = A'r.+γ.*x
-end;
-
-# ╔═╡ 46e3d08a-a708-407b-b176-d97b38a63ff4
-begin
-	r(r:: Array{<:Number}, δ:: Number, i:: Int64; A=A) = Vector{Float64}(r.+δ.*A[:, i])
-	# ∇fᵢ em função do resíduo
-	∇fᵢ(x:: Array{<:Number}, r:: Array{<:Number}, i:: Int64; A=A, γ=γ) = A[:, i]'r+γ*x[i]
 end;
 
 # ╔═╡ f9c0f315-7df1-4f75-aa65-9e35eaab5e0b
 begin
-	xGD, GDhist = GD(x⁰, r, f, ∇f, L, ftarget, kₘₐₓ)
+	@time xGD, GDhist, tGD = GD(x⁰, r, f, ∇f, L, ftarget, kₘₐₓ)
 
 	# Plot do histórico
 	pGD = plot(xlabel=L"k", ylabel=L"f")
@@ -175,15 +172,44 @@ begin
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
 end
 
+# ╔═╡ 5fba20cb-cf7e-4f72-ab9f-43c196aa1449
+tGD
+
+# ╔═╡ 46e3d08a-a708-407b-b176-d97b38a63ff4
+begin
+	function r!(r:: Array{<:Number}, δ:: Number, i:: Int64; A=A) 
+		@inbounds for j = A.colptr[i]:A.colptr[i+1]-1
+			r[A.rowval[j]] += δ*A.nzval[j]
+		end
+	end
+		
+	# ∇fᵢ em função do resíduo
+	function ∇fᵢ(x:: Array{<:Number}, r:: Array{<:Number}, i:: Int64; A=A, γ=γ) 
+		sum = γ*x[i]
+		@inbounds for j = A.colptr[i]:A.colptr[i+1]-1
+			sum += r[A.rowval[j]]*A.nzval[j]
+		end
+
+		return sum
+	end
+end;
+
 # ╔═╡ 4887df3c-5539-45b9-b4eb-759ae4d80916
 begin
-	xCD, CDhist = CD(x⁰, r, f, ∇fᵢ, Lₘₐₓ, ftarget, kₘₐₓ)
+	@btime CD(x⁰, r, r!, f, ∇fᵢ, Lₘₐₓ, ftarget, kₘₐₓ)
+	xCD, CDhist, tCD = CD(x⁰, r, step!, f, ftarget, kₘₐₓ)
 
 	# Plot do histórico
 	pCD = plot(xlabel=L"k", ylabel=L"f")
 	plot!(eachindex(CDhist), CDhist, label=L"f(x^k)", linewidth=2, color=:royalblue)
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
 end
+
+# ╔═╡ 1965c565-8634-49fe-bd91-fb55130221d3
+tCD
+
+# ╔═╡ b0cf606f-2b13-46f2-8103-5e25c0566171
+norm(A*xCD.-b)^2/2, ftarget
 
 # ╔═╡ 4df672e6-3af1-48a7-9aa4-7a963566375e
 html"""
@@ -213,6 +239,7 @@ html"""
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MAT = "23992714-dd62-5051-b70f-ba57cb901cac"
@@ -221,6 +248,7 @@ PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [compat]
+BenchmarkTools = "~1.6.0"
 LaTeXStrings = "~1.4.0"
 MAT = "~0.10.7"
 Plots = "~1.40.13"
@@ -233,7 +261,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "6cd403ddd53770a18ed31688884a2987be9d450f"
+project_hash = "cebd212be5ca1b3eec8c7a631caecd150a67ff3f"
 
 [[deps.AbstractPlutoDingetjes]]
 deps = ["Pkg"]
@@ -258,6 +286,12 @@ version = "1.11.0"
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
+
+[[deps.BenchmarkTools]]
+deps = ["Compat", "JSON", "Logging", "Printf", "Profile", "Statistics", "UUIDs"]
+git-tree-sha1 = "e38fbc49a620f5d0b660d7f543db1009fe0f8336"
+uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+version = "1.6.0"
 
 [[deps.BitFlags]]
 git-tree-sha1 = "0691e34b3bb8be9307330f88d1a3c3f25466c24d"
@@ -938,6 +972,10 @@ deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 version = "1.11.0"
 
+[[deps.Profile]]
+uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
+version = "1.11.0"
+
 [[deps.PtrArrays]]
 git-tree-sha1 = "1d36ef11a9aaf1e8b74dacc6a731dd1de8fd493d"
 uuid = "43287f4e-b6f4-7ad1-bb20-aadabca52c3d"
@@ -1461,10 +1499,13 @@ version = "1.8.1+0"
 # ╠═52f82104-1edd-46e0-833c-7f32ec3fd19f
 # ╠═3864d806-f27c-4f3d-bdaa-7dae22556b19
 # ╠═f9c0f315-7df1-4f75-aa65-9e35eaab5e0b
+# ╠═5fba20cb-cf7e-4f72-ab9f-43c196aa1449
 # ╟─f3217d91-76c4-4b3d-8599-5b8d3e126058
 # ╠═46e3d08a-a708-407b-b176-d97b38a63ff4
 # ╠═610743bb-ce51-4cc7-b42f-3439cffaf595
 # ╠═4887df3c-5539-45b9-b4eb-759ae4d80916
+# ╠═b0cf606f-2b13-46f2-8103-5e25c0566171
+# ╠═1965c565-8634-49fe-bd91-fb55130221d3
 # ╟─d97e95cc-f895-4521-b23a-f7a9267f54a9
 # ╠═9f4351d7-9b4f-429c-83f2-056458683b88
 # ╠═4df672e6-3af1-48a7-9aa4-7a963566375e
