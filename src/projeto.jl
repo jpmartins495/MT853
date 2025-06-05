@@ -34,17 +34,13 @@ end
 # ╔═╡ d0926a75-5e6f-4460-9cff-02d28c41be42
 md"""
 ### Leitura dos dados
-Selecione o diretório dos arquivos .mat: `path =` $(@bind path TextField((40, 2), default=pwd()*"\\coord-examples")).
-"""
-
-# ╔═╡ a4a676e3-bff2-47e2-a954-d49b6a189420
-md"""
-### Funções do problema e inicialização
+Selecione o diretório dos arquivos .mat: `path =` $(@bind path TextField((40, 2), default=pwd()*"/coord-examples")).
 """
 
 # ╔═╡ 90124009-b5c1-45df-a7c8-b5fe334fb10e
 md"""
-O parâmetro `kₘₐₓ =` $(@bind kₘₐₓ Scrubbable(100:100:10000; default = 10000)) determina o número máximo de iterações para o método do gradiente. 
+### Parâmetros do problema e inicialização
+O parâmetro `kₘₐₓ =` $(@bind kₘₐₓ NumberField(100:100:10000; default = 10000)) determina o número máximo de iterações para o método do gradiente. 
 
 Já para o método do descenso coordenado, como $n$ iterações equivalem em média a uma iteração do gradiente, tomamos `n⋅kₘₐₓ` como número máximo de iterações.
 """
@@ -83,6 +79,49 @@ function GD(x⁰:: Array{<:Number}, r:: Function, f:: Function, ∇f:: Function,
 	end
 end;
 
+# ╔═╡ f3217d91-76c4-4b3d-8599-5b8d3e126058
+md"""
+### Método do descenso coordenado
+"""
+
+# ╔═╡ 610743bb-ce51-4cc7-b42f-3439cffaf595
+function CD(x⁰:: Array{<:Number}, r:: Function, f:: Function, ∇fᵢ:: Function, Lₘₐₓ:: Number, ftarget:: Number, kₘₐₓ:: Int64)
+	xᵏ = copy(x⁰)
+	rᵏ = r(xᵏ) # Resíduo de x⁰
+
+	# Histórico de iterados em valor objetivo
+	fhist = Vector{Float64}(undef, kₘₐₓ+1) 
+	fhist[1] = f(xᵏ, rᵏ)
+
+	# Dimensão de x
+	n = length(xᵏ)
+	
+	k = 1
+	while true	
+		for i = 1:n
+			# Escolha de randômica iₖ com distribuição uniforme
+			iₖ = rand(eachindex(xᵏ))
+			# Cálculo do passo em iₖ
+			δ = -∇fᵢ(xᵏ, rᵏ, iₖ)/Lₘₐₓ
+			# Update da coordenada iₖ	
+			xᵏ[iₖ] += δ
+			# Update do resíduo
+			rᵏ = r(rᵏ, δ, iₖ)
+		end
+
+		# Update do histórico (só em iterações múltiplas de n)
+		fxᵏ = f(xᵏ, rᵏ)
+		fhist[k+1] = fxᵏ
+
+		# Critério de parada
+		if fxᵏ ≤ ftarget || k == kₘₐₓ
+			return xᵏ, fhist[1:k+1]
+		end
+				
+		k += 1
+	end
+end;
+
 # ╔═╡ d97e95cc-f895-4521-b23a-f7a9267f54a9
 md"""
 ### Código adicional para rodar o caderno
@@ -93,12 +132,12 @@ tests_list = [file => file[begin:end-8] for file = readdir(path)];
 
 # ╔═╡ 4f87749a-297f-4710-a3ab-5aa341adbbba
 md"""
-Selecione o nome da instãncia de teste: `test =` $(@bind test Select(tests_list)).
+Selecione o nome da instância de teste: `test =` $(@bind test Select(tests_list)).
 """
 
 # ╔═╡ a304fcea-6898-465a-9736-cd52e9c48339
 begin
-	test_dict = matread("$path\\$(test)")
+	test_dict = matread("$path/$(test)")
 	
 	A, ftarget, b, γ, L, Lₘₐₓ = getindex.(Ref(test_dict), ["A", "ftarget", "b", "gamma", "L", "Lmax"])
 	b = vec(b) # Transforma b de Array{, 2}(n,1) para Vector{}(n,)
@@ -106,24 +145,43 @@ begin
 	@info "Variáveis do teste:" A=summary(A) ftarget=ftarget b=summary(b) γ=γ L=L Lₘₐₓ=Lₘₐₓ
 end
 
+# ╔═╡ 097b00e3-42eb-4cbc-850f-f7103d7a8053
+x⁰ = zeros(size(A, 2));
+
 # ╔═╡ 52f82104-1edd-46e0-833c-7f32ec3fd19f
 begin 
 	# Função do resíduo
 	r(x:: Array{<:Number}; A=A, b=b) = A*x.-b
+	
 	# f e ∇f em função do resíduo
 	f(x:: Array{<:Number}, r:: Array{<:Number}; γ=γ) = (r'r+γ*(x'x))/2
 	∇f(x:: Array{<:Number}, r:: Array{<:Number}; A=A, γ=γ) = A'r.+γ.*x
-	
-	
-	x⁰ = zeros(size(A, 2))
+end;
+
+# ╔═╡ 46e3d08a-a708-407b-b176-d97b38a63ff4
+begin
+	r(r:: Array{<:Number}, δ:: Number, i:: Int64; A=A) = Vector{Float64}(r.+δ.*A[:, i])
+	# ∇fᵢ em função do resíduo
+	∇fᵢ(x:: Array{<:Number}, r:: Array{<:Number}, i:: Int64; A=A, γ=γ) = A[:, i]'r+γ*x[i]
 end;
 
 # ╔═╡ f9c0f315-7df1-4f75-aa65-9e35eaab5e0b
 begin
 	xGD, GDhist = GD(x⁰, r, f, ∇f, L, ftarget, kₘₐₓ)
-	
-	p = plot(xlabel=L"k", ylabel=L"f")
+
+	# Plot do histórico
+	pGD = plot(xlabel=L"k", ylabel=L"f")
 	plot!(eachindex(GDhist), GDhist, label=L"f(x^k)", linewidth=2, color=:royalblue)
+	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
+end
+
+# ╔═╡ 4887df3c-5539-45b9-b4eb-759ae4d80916
+begin
+	xCD, CDhist = CD(x⁰, r, f, ∇fᵢ, Lₘₐₓ, ftarget, kₘₐₓ)
+
+	# Plot do histórico
+	pCD = plot(xlabel=L"k", ylabel=L"f")
+	plot!(eachindex(CDhist), CDhist, label=L"f(x^k)", linewidth=2, color=:royalblue)
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
 end
 
@@ -1397,12 +1455,16 @@ version = "1.8.1+0"
 # ╟─d0926a75-5e6f-4460-9cff-02d28c41be42
 # ╟─4f87749a-297f-4710-a3ab-5aa341adbbba
 # ╠═a304fcea-6898-465a-9736-cd52e9c48339
-# ╟─a4a676e3-bff2-47e2-a954-d49b6a189420
-# ╠═52f82104-1edd-46e0-833c-7f32ec3fd19f
 # ╟─90124009-b5c1-45df-a7c8-b5fe334fb10e
+# ╠═097b00e3-42eb-4cbc-850f-f7103d7a8053
 # ╟─37ac9560-32cb-4b9c-9937-b9b838c22b52
+# ╠═52f82104-1edd-46e0-833c-7f32ec3fd19f
 # ╠═3864d806-f27c-4f3d-bdaa-7dae22556b19
 # ╠═f9c0f315-7df1-4f75-aa65-9e35eaab5e0b
+# ╟─f3217d91-76c4-4b3d-8599-5b8d3e126058
+# ╠═46e3d08a-a708-407b-b176-d97b38a63ff4
+# ╠═610743bb-ce51-4cc7-b42f-3439cffaf595
+# ╠═4887df3c-5539-45b9-b4eb-759ae4d80916
 # ╟─d97e95cc-f895-4521-b23a-f7a9267f54a9
 # ╠═9f4351d7-9b4f-429c-83f2-056458683b88
 # ╠═4df672e6-3af1-48a7-9aa4-7a963566375e
