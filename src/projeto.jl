@@ -118,7 +118,7 @@ function CD(x⁰:: Array{<:Number}, r:: Function, r!:: Function, f:: Function, �
 		fhist[k+1] = fxᵏ
 
 		# Critério de parada
-		if k == kₘₐₓ
+		if fxᵏ ≤ ftarget || k == kₘₐₓ
 			return xᵏ, fhist[1:k+1], time()-T
 		end
 				
@@ -172,9 +172,6 @@ begin
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
 end
 
-# ╔═╡ 5fba20cb-cf7e-4f72-ab9f-43c196aa1449
-tGD
-
 # ╔═╡ 46e3d08a-a708-407b-b176-d97b38a63ff4
 begin
 	function r!(r:: Array{<:Number}, δ:: Number, i:: Int64; A=A) 
@@ -196,20 +193,13 @@ end;
 
 # ╔═╡ 4887df3c-5539-45b9-b4eb-759ae4d80916
 begin
-	@btime CD(x⁰, r, r!, f, ∇fᵢ, Lₘₐₓ, ftarget, kₘₐₓ)
-	xCD, CDhist, tCD = CD(x⁰, r, step!, f, ftarget, kₘₐₓ)
+	@time xCD, CDhist, tCD = CD(x⁰, r, r!, f, ∇fᵢ, Lₘₐₓ, ftarget, kₘₐₓ)
 
 	# Plot do histórico
 	pCD = plot(xlabel=L"k", ylabel=L"f")
 	plot!(eachindex(CDhist), CDhist, label=L"f(x^k)", linewidth=2, color=:royalblue)
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
 end
-
-# ╔═╡ 1965c565-8634-49fe-bd91-fb55130221d3
-tCD
-
-# ╔═╡ b0cf606f-2b13-46f2-8103-5e25c0566171
-norm(A*xCD.-b)^2/2, ftarget
 
 # ╔═╡ 4df672e6-3af1-48a7-9aa4-7a963566375e
 html"""
@@ -1499,13 +1489,10 @@ version = "1.8.1+0"
 # ╠═52f82104-1edd-46e0-833c-7f32ec3fd19f
 # ╠═3864d806-f27c-4f3d-bdaa-7dae22556b19
 # ╠═f9c0f315-7df1-4f75-aa65-9e35eaab5e0b
-# ╠═5fba20cb-cf7e-4f72-ab9f-43c196aa1449
 # ╟─f3217d91-76c4-4b3d-8599-5b8d3e126058
 # ╠═46e3d08a-a708-407b-b176-d97b38a63ff4
 # ╠═610743bb-ce51-4cc7-b42f-3439cffaf595
 # ╠═4887df3c-5539-45b9-b4eb-759ae4d80916
-# ╠═b0cf606f-2b13-46f2-8103-5e25c0566171
-# ╠═1965c565-8634-49fe-bd91-fb55130221d3
 # ╟─d97e95cc-f895-4521-b23a-f7a9267f54a9
 # ╠═9f4351d7-9b4f-429c-83f2-056458683b88
 # ╠═4df672e6-3af1-48a7-9aa4-7a963566375e
