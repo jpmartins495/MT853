@@ -52,34 +52,22 @@ md"""
 ### Método do gradiente
 """
 
-# ╔═╡ 3864d806-f27c-4f3d-bdaa-7dae22556b19
-function GD(x⁰:: Array{<:Number}, r:: Function, f:: Function, ∇f:: Function, L:: Number, ftarget:: Number, kₘₐₓ:: Int64)
-	T = time()
-	xᵏ = x⁰
-	rᵏ = r(xᵏ) # Resíduo
+# ╔═╡ 52f82104-1edd-46e0-833c-7f32ec3fd19f
+begin 
+# Atualização do resíduo
+function r!(x::Array{<:Number}, r::Array{<:Number}, A::SparseMatrixCSC{Float64, Int64}, b::Vector{Float64})
+    mul!(r, A, x)
+    r .-= b
+end
 
-	# Histórico de iterados em valor objetivo
-	fhist = Vector{Float64}(undef, kₘₐₓ+1) 
-	fhist[1] = f(xᵏ, rᵏ)
-	
-	k = 1
-	while true				
-		# Update do gradiente	
-		xᵏ = xᵏ.-∇f(xᵏ, rᵏ)./L
-		# Update do resíduo
-		rᵏ = r(xᵏ)
-
-		# Update do histórico
-		fxᵏ = f(xᵏ, rᵏ)
-		fhist[k+1] = fxᵏ
-		
-		# Critério de parada
-		if fxᵏ ≤ ftarget || k == kₘₐₓ
-			return xᵏ, fhist[1:k+1], time()-T
-		end
-				
-		k += 1
-	end
+# f e ∇f em função do resíduo
+function f(x::Array{<:Number}, r::Array{<:Number}, γ::Number)
+    return (dot(r, r) + γ * dot(x, x)) / 2
+end
+function ∇f!(x::Array{<:Number}, r::Array{<:Number}, ∇f::Array{<:Number}, A::SparseMatrixCSC{Float64, Int64}, γ::Number)
+    mul!(∇f, A', r)
+    ∇f .+= γ*x
+end
 end;
 
 # ╔═╡ f3217d91-76c4-4b3d-8599-5b8d3e126058
@@ -87,43 +75,59 @@ md"""
 ### Método do descenso coordenado
 """
 
-# ╔═╡ 610743bb-ce51-4cc7-b42f-3439cffaf595
-function CD(x⁰:: Array{<:Number}, r:: Function, r!:: Function, f:: Function, ∇fᵢ:: Function, Lₘₐₓ:: Number, ftarget:: Number, kₘₐₓ:: Int64)
-	T = time()
-	xᵏ = copy(x⁰)
-	rᵏ = r(xᵏ) # Resíduo de x⁰
+# ╔═╡ fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
+begin
+# Update eficiente do resíduo
+function upr!(r::Array{<:Number}, δ::Number, i::Int64, A::SparseMatrixCSC{Float64,Int64})
+    @inbounds for j = A.colptr[i]:A.colptr[i+1]-1
+        r[A.rowval[j]] += δ * A.nzval[j]
+    end
+end;
 
-	# Histórico de iterados em valor objetivo
-	fhist = Vector{Float64}(undef, kₘₐₓ+1) 
-	fhist[1] = f(xᵏ, rᵏ)
+# ∇fᵢ
+function ∇fᵢ(x::Array{<:Number}, r::Array{<:Number}, i::Int64, A::SparseMatrixCSC{Float64,Int64}, γ::Number)
+    s = γ * x[i]
+    @inbounds for j = A.colptr[i]:A.colptr[i+1]-1
+        s += r[A.rowval[j]] * A.nzval[j]
+    end
+    return s
+end
+end;
 
-	# Dimensão de x
-	n = length(xᵏ)
-	
-	k = 1
-	while true	
-		for i = 1:n
-			# Escolha de randômica iₖ com distribuição uniforme
-			iₖ = rand(1:n)
-			# Cálculo do passo em iₖ
-			δ = -∇fᵢ(xᵏ, rᵏ, iₖ)/Lₘₐₓ
-			# Update da coordenada iₖ	
-			xᵏ[iₖ] += δ
-			# Update do resíduo
-			r!(rᵏ, δ, iₖ)
-		end
+# ╔═╡ 48c67201-e79a-4719-aba3-ec94547cd3c8
+function CD!(x::Vector{Float64}, A::SparseMatrixCSC{Float64,Int}, b::Vector{Float64}, γ::Float64, Lₘₐₓ::Float64, ftarget::Float64, kₘₐₓ::Int)
+    n = length(x)
 
-		# Update do histórico (só em iterações múltiplas de n)
-		fxᵏ = f(xᵏ, rᵏ)
-		fhist[k+1] = fxᵏ
+    # Resíduo inicial
+    r = similar(b)
+    mul!(r, A, x)
+    r .-= b 
 
-		# Critério de parada
-		if fxᵏ ≤ ftarget || k == kₘₐₓ
-			return xᵏ, fhist[1:k+1], time()-T
-		end
-				
-		k += 1
-	end
+    # Histórico de iterados em valor objetivo
+	fhist = Vector{Float64}(undef, n*kₘₐₓ+1) 
+	fhist[1] = f(x, r, γ)
+    
+    k = 1
+    while k <= n * kₘₐₓ
+        i = rand(1:n)
+
+        ∇i = ∇fᵢ(x, r, i, A, γ)
+        δ = -∇i/Lₘₐₓ
+        x[i] += δ
+        upr!(r, δ, i, A)
+
+        # A cada n iterações atualiza o histórico e checa o critério de parada
+        if k % n == 0
+            fval = f(x, r, γ)
+            fhist[Int(k/n+1)]=fval
+
+            if fval ≤ ftarget
+                return fhist[1:Int(k/n+1)]
+            end
+        end
+
+        k += 1
+    end
 end;
 
 # ╔═╡ d97e95cc-f895-4521-b23a-f7a9267f54a9
@@ -152,48 +156,64 @@ end
 # ╔═╡ 097b00e3-42eb-4cbc-850f-f7103d7a8053
 x⁰ = zeros(size(A, 2));
 
-# ╔═╡ 52f82104-1edd-46e0-833c-7f32ec3fd19f
-begin 
-	# Função do resíduo
-	r(x:: Array{<:Number}; A=A, b=b) = A*x.-b
-	
-	# f e ∇f em função do resíduo
-	f(x:: Array{<:Number}, r:: Array{<:Number}; γ=γ) = (norm(r)^2+γ*norm(x)^2)/2
-	∇f(x:: Array{<:Number}, r:: Array{<:Number}; A=A, γ=γ) = A'r.+γ.*x
+# ╔═╡ e96cba24-d34e-49d8-9d89-bcb3074578f6
+function GD!(x::Array{<:Number}, f::Function, A::SparseMatrixCSC{Float64, Int64}, b::Vector{Float64}, L::Number, ftarget::Number, kₘₐₓ::Number)
+    r = similar(b)
+    mul!(r, A, x)     # Resíduo inicial
+    r .-= b
+
+    ∇f = similar(x)
+    mul!(∇f, A', r)     # ∇f(x⁰)
+    ∇f .+= γ*x
+
+	# Histórico de iterados em valor objetivo
+	fhist = Vector{Float64}(undef, kₘₐₓ+1) 
+	fhist[1] = f(x, r, γ)
+
+    k=1
+    while k ≤ kₘₐₓ
+        # Atualização do x
+        @inbounds for i in eachindex(x)
+            x[i] -= ∇f[i] / L
+        end
+        # Atualização do r
+        r!(x, r, A, b)
+        # Atualização do ∇f
+        ∇f!(x, r, ∇f, A, γ)
+
+		# Update do histórico e critério de parada      
+        fval = f(x, r, γ)
+		fhist[k+1]=fval
+		
+        if fval ≤ ftarget || k ≥ kₘₐₓ
+            return fhist[1:k+1]
+        end
+
+        k+=1
+    end
 end;
 
-# ╔═╡ f9c0f315-7df1-4f75-aa65-9e35eaab5e0b
-begin
-	@time xGD, GDhist, tGD = GD(x⁰, r, f, ∇f, L, ftarget, kₘₐₓ)
+# ╔═╡ 3242e3ea-90f5-4e71-9cbe-f7b3788168df
+# Tempo de execução
 
-	# Plot do histórico
+GDhist = @btime GD!(x, f, $A, $b, $L, $ftarget, $kₘₐₓ) setup = (x = copy($x⁰));
+# O comando setup garante que @btime não reutilize valores modificados de x⁰
+
+# ╔═╡ 649cfa2b-da5f-42c4-9063-1f173141b3e4
+begin
+# Plot do histórico	
 	pGD = plot(xlabel=L"k", ylabel=L"f")
 	plot!(eachindex(GDhist), GDhist, label=L"f(x^k)", linewidth=2, color=:royalblue)
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
 end
 
-# ╔═╡ 46e3d08a-a708-407b-b176-d97b38a63ff4
-begin
-	function r!(r:: Array{<:Number}, δ:: Number, i:: Int64; A=A) 
-		@inbounds for j = A.colptr[i]:A.colptr[i+1]-1
-			r[A.rowval[j]] += δ*A.nzval[j]
-		end
-	end
-		
-	# ∇fᵢ em função do resíduo
-	function ∇fᵢ(x:: Array{<:Number}, r:: Array{<:Number}, i:: Int64; A=A, γ=γ) 
-		sum = γ*x[i]
-		@inbounds for j = A.colptr[i]:A.colptr[i+1]-1
-			sum += r[A.rowval[j]]*A.nzval[j]
-		end
+# ╔═╡ 5b12f767-fc85-4f48-a50d-73ddcc77b6c1
+# Tempo de execução
 
-		return sum
-	end
-end;
+CDhist = @btime CD!(x, $A, $b, $γ, $Lₘₐₓ, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰));
 
 # ╔═╡ 4887df3c-5539-45b9-b4eb-759ae4d80916
 begin
-	@time xCD, CDhist, tCD = CD(x⁰, r, r!, f, ∇fᵢ, Lₘₐₓ, ftarget, kₘₐₓ)
 
 	# Plot do histórico
 	pCD = plot(xlabel=L"k", ylabel=L"f")
@@ -1487,11 +1507,13 @@ version = "1.8.1+0"
 # ╠═097b00e3-42eb-4cbc-850f-f7103d7a8053
 # ╟─37ac9560-32cb-4b9c-9937-b9b838c22b52
 # ╠═52f82104-1edd-46e0-833c-7f32ec3fd19f
-# ╠═3864d806-f27c-4f3d-bdaa-7dae22556b19
-# ╠═f9c0f315-7df1-4f75-aa65-9e35eaab5e0b
+# ╠═e96cba24-d34e-49d8-9d89-bcb3074578f6
+# ╠═3242e3ea-90f5-4e71-9cbe-f7b3788168df
+# ╠═649cfa2b-da5f-42c4-9063-1f173141b3e4
 # ╟─f3217d91-76c4-4b3d-8599-5b8d3e126058
-# ╠═46e3d08a-a708-407b-b176-d97b38a63ff4
-# ╠═610743bb-ce51-4cc7-b42f-3439cffaf595
+# ╠═fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
+# ╠═48c67201-e79a-4719-aba3-ec94547cd3c8
+# ╠═5b12f767-fc85-4f48-a50d-73ddcc77b6c1
 # ╠═4887df3c-5539-45b9-b4eb-759ae4d80916
 # ╟─d97e95cc-f895-4521-b23a-f7a9267f54a9
 # ╠═9f4351d7-9b4f-429c-83f2-056458683b88
