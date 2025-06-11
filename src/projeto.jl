@@ -151,6 +151,7 @@ function CD!(x:: Array{<:Number}, r, f:: Function, r!:: Function, ∇fᵢ:: Func
 
         k += 1
     end
+
 end;
 
 # ╔═╡ fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
@@ -214,7 +215,7 @@ GDhist = @btime GD!(x, r, $f, $r!, $∇f!, $L, $ftarget, $kₘₐₓ) setup = (x
 
 # ╔═╡ 649cfa2b-da5f-42c4-9063-1f173141b3e4
 begin
-	# Plot do histórico	
+	# Plot do histórico
 	pGD = plot(xlabel=L"k", ylabel=L"f")
 	plot!(eachindex(GDhist), GDhist, label=L"f(x^k)", linewidth=2, color=:royalblue)
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
