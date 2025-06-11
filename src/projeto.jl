@@ -31,6 +31,8 @@ begin
 	using LaTeXStrings
 	# Teste de performance
 	using BenchmarkTools
+	# Plots de performance profile
+	using BenchmarkProfiles
 end
 
 # ╔═╡ d0926a75-5e6f-4460-9cff-02d28c41be42
@@ -38,6 +40,18 @@ md"""
 ### Leitura dos dados
 Selecione o diretório dos arquivos .mat: `path =` $(@bind path TextField((40, 2), default=pwd()*"/coord-examples")).
 """
+
+# ╔═╡ a304fcea-6898-465a-9736-cd52e9c48339
+function read_mat(path, test)
+	test_dict = matread("$path/$(test)")
+	
+	A, ftarget, b, γ, L, Lₘₐₓ = getindex.(Ref(test_dict), ["A", "ftarget", "b", "gamma", "L", "Lmax"])
+	b = vec(b) # Transforma b de Array{, 2}(n,1) para Vector{}(n,)
+
+	@info "Variáveis do teste $(test):" A=summary(A) ftarget=ftarget b=summary(b) γ=γ L=L Lₘₐₓ=Lₘₐₓ
+
+	return A, ftarget, b, γ, L, Lₘₐₓ
+end;
 
 # ╔═╡ 90124009-b5c1-45df-a7c8-b5fe334fb10e
 md"""
@@ -52,22 +66,54 @@ md"""
 ### Método do gradiente
 """
 
-# ╔═╡ 52f82104-1edd-46e0-833c-7f32ec3fd19f
-begin 
-# Atualização do resíduo
-function r!(x::Array{<:Number}, r::Array{<:Number}, A::SparseMatrixCSC{Float64, Int64}, b::Vector{Float64})
-    mul!(r, A, x)
-    r .-= b
-end
+# ╔═╡ e96cba24-d34e-49d8-9d89-bcb3074578f6
+function GD!(x:: Array{<:Number}, r, f:: Function, r!:: Function, ∇f!:: Function, L:: Number, ftarget:: Number, kₘₐₓ:: Int)
+	# ∇f(x⁰)
+    ∇f = similar(x) 
+    ∇f!(∇f, x, r)
+	# Histórico de iterados em valor objetivo
+	fhist = Vector{Float64}(undef, kₘₐₓ+1) 
+	fhist[1] = f(x, r)
 
-# f e ∇f em função do resíduo
-function f(x::Array{<:Number}, r::Array{<:Number}, γ::Number)
-    return (dot(r, r) + γ * dot(x, x)) / 2
-end
-function ∇f!(x::Array{<:Number}, r::Array{<:Number}, ∇f::Array{<:Number}, A::SparseMatrixCSC{Float64, Int64}, γ::Number)
-    mul!(∇f, A', r)
-    ∇f .+= γ*x
-end
+    k=1
+    while true
+        # Atualização do iterado
+        x .-= ∇f./L
+        # Atualização do resíduo
+        r!(r, x)
+        # Atualização do ∇f
+        ∇f!(∇f, x, r)
+		# Update do histórico e critério de parada      
+        fx = f(x, r)
+		fhist[k+1] = fx
+		
+        if fx ≤ ftarget || k ≥ kₘₐₓ
+            return fhist[1:k+1]
+        end
+
+        k += 1
+    end
+end;
+
+# ╔═╡ 52f82104-1edd-46e0-833c-7f32ec3fd19f
+function GDfuncs(A:: SparseMatrixCSC{<:Number, <:Integer}, b:: Array{<:Number}, γ:: Number) 
+	# Atualização do resíduo
+	function r!(r:: Array{<:Number}, x:: Array{<:Number}; A=A, b=b)
+	    mul!(r, A, x)
+	    r .-= b
+	end
+	
+	# f e ∇f em função do resíduo
+	function f(x:: Array{<:Number}, r:: Array{<:Number}; γ=γ)
+	    return (dot(r, r)+γ*dot(x, x))/2
+	end
+	
+	function ∇f!(∇f:: Array{<:Number}, x:: Array{<:Number}, r:: Array{<:Number}; A=A, γ=γ)
+	    mul!(∇f, A', r)
+	    ∇f .+= γ.*x
+	end
+
+	return r!, f, ∇f!
 end;
 
 # ╔═╡ f3217d91-76c4-4b3d-8599-5b8d3e126058
@@ -75,60 +121,66 @@ md"""
 ### Método do descenso coordenado
 """
 
-# ╔═╡ fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
-begin
-# Update eficiente do resíduo
-function upr!(r::Array{<:Number}, δ::Number, i::Int64, A::SparseMatrixCSC{Float64,Int64})
-    @inbounds for j = A.colptr[i]:A.colptr[i+1]-1
-        r[A.rowval[j]] += δ * A.nzval[j]
-    end
-end;
-
-# ∇fᵢ
-function ∇fᵢ(x::Array{<:Number}, r::Array{<:Number}, i::Int64, A::SparseMatrixCSC{Float64,Int64}, γ::Number)
-    s = γ * x[i]
-    @inbounds for j = A.colptr[i]:A.colptr[i+1]-1
-        s += r[A.rowval[j]] * A.nzval[j]
-    end
-    return s
-end
-end;
-
 # ╔═╡ 48c67201-e79a-4719-aba3-ec94547cd3c8
-function CD!(x::Vector{Float64}, A::SparseMatrixCSC{Float64,Int}, b::Vector{Float64}, γ::Float64, Lₘₐₓ::Float64, ftarget::Float64, kₘₐₓ::Int)
+function CD!(x:: Array{<:Number}, r, f:: Function, r!:: Function, ∇fᵢ:: Function, Lₘₐₓ:: Number, ftarget:: Number, kₘₐₓ:: Int)
     n = length(x)
 
-    # Resíduo inicial
-    r = similar(b)
-    mul!(r, A, x)
-    r .-= b 
-
     # Histórico de iterados em valor objetivo
-	fhist = Vector{Float64}(undef, n*kₘₐₓ+1) 
-	fhist[1] = f(x, r, γ)
+	fhist = Vector{Float64}(undef, kₘₐₓ+1) 
+	fhist[1] = f(x, r)
     
     k = 1
-    while k <= n * kₘₐₓ
-        i = rand(1:n)
-
-        ∇i = ∇fᵢ(x, r, i, A, γ)
-        δ = -∇i/Lₘₐₓ
-        x[i] += δ
-        upr!(r, δ, i, A)
-
+    while true
+		for j = 1:n
+	        i = rand(1:n)
+			# Tamanho do passo
+	        δ = -∇fᵢ(x, r, i)/Lₘₐₓ
+			# Atualização do iterado
+	        x[i] += δ
+			# Atualização do resíduo
+	        r!(r, δ, i)
+		end
+		
         # A cada n iterações atualiza o histórico e checa o critério de parada
-        if k % n == 0
-            fval = f(x, r, γ)
-            fhist[Int(k/n+1)]=fval
+        fx = f(x, r)
+        fhist[k+1] = fx
 
-            if fval ≤ ftarget
-                return fhist[1:Int(k/n+1)]
-            end
+        if fx ≤ ftarget || k ≥ kₘₐₓ
+        	return fhist[1:k+1]
         end
 
         k += 1
     end
+
 end;
+
+# ╔═╡ fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
+function CDfuncs(A:: SparseMatrixCSC{<:Number, <:Integer}, γ:: Number)
+	# Update eficiente do resíduo
+	function rCD!(r:: Array{<:Number}, δ:: Number, i:: Int64; A=A)
+		@inbounds for j = A.colptr[i]:A.colptr[i+1]-1
+	        r[A.rowval[j]] += δ*A.nzval[j]
+	    end
+	end
+	
+	# ∇fᵢ
+	function ∇fᵢ(x:: Array{<:Number}, r:: Array{<:Number}, i:: Int64; A=A, γ=γ)
+	    sum = γ*x[i]
+		
+	    @inbounds for j = A.colptr[i]:A.colptr[i+1]-1
+	        sum += r[A.rowval[j]]*A.nzval[j]
+	    end
+	    
+		return sum
+	end
+
+	return rCD!, ∇fᵢ
+end;
+
+# ╔═╡ b928572d-5aa0-4a7d-a81a-5c31c406f033
+md"""
+### Perfil de desempenho
+"""
 
 # ╔═╡ d97e95cc-f895-4521-b23a-f7a9267f54a9
 md"""
@@ -143,82 +195,77 @@ md"""
 Selecione o nome da instância de teste: `test =` $(@bind test Select(tests_list)).
 """
 
-# ╔═╡ a304fcea-6898-465a-9736-cd52e9c48339
-begin
-	test_dict = matread("$path/$(test)")
-	
-	A, ftarget, b, γ, L, Lₘₐₓ = getindex.(Ref(test_dict), ["A", "ftarget", "b", "gamma", "L", "Lmax"])
-	b = vec(b) # Transforma b de Array{, 2}(n,1) para Vector{}(n,)
+# ╔═╡ 2aa34d12-1abe-4283-87d9-3ffcbc9d5a92
+A, ftarget, b, γ, L, Lₘₐₓ = read_mat(path, test);
 
-	@info "Variáveis do teste:" A=summary(A) ftarget=ftarget b=summary(b) γ=γ L=L Lₘₐₓ=Lₘₐₓ
-end
+# ╔═╡ 05446cb9-b59f-475a-ab51-e883d3576c53
+r!, f, ∇f! = GDfuncs(A, b, γ);
 
 # ╔═╡ 097b00e3-42eb-4cbc-850f-f7103d7a8053
-x⁰ = zeros(size(A, 2));
-
-# ╔═╡ e96cba24-d34e-49d8-9d89-bcb3074578f6
-function GD!(x::Array{<:Number}, f::Function, A::SparseMatrixCSC{Float64, Int64}, b::Vector{Float64}, L::Number, ftarget::Number, kₘₐₓ::Number)
-    r = similar(b)
-    mul!(r, A, x)     # Resíduo inicial
-    r .-= b
-
-    ∇f = similar(x)
-    mul!(∇f, A', r)     # ∇f(x⁰)
-    ∇f .+= γ*x
-
-	# Histórico de iterados em valor objetivo
-	fhist = Vector{Float64}(undef, kₘₐₓ+1) 
-	fhist[1] = f(x, r, γ)
-
-    k=1
-    while k ≤ kₘₐₓ
-        # Atualização do x
-        @inbounds for i in eachindex(x)
-            x[i] -= ∇f[i] / L
-        end
-        # Atualização do r
-        r!(x, r, A, b)
-        # Atualização do ∇f
-        ∇f!(x, r, ∇f, A, γ)
-
-		# Update do histórico e critério de parada      
-        fval = f(x, r, γ)
-		fhist[k+1]=fval
-		
-        if fval ≤ ftarget || k ≥ kₘₐₓ
-            return fhist[1:k+1]
-        end
-
-        k+=1
-    end
+begin
+	x⁰ = zeros(size(A, 2))
+	r⁰ = similar(b)
+	r!(r⁰, x⁰)
 end;
 
 # ╔═╡ 3242e3ea-90f5-4e71-9cbe-f7b3788168df
 # Tempo de execução
-
-GDhist = @btime GD!(x, f, $A, $b, $L, $ftarget, $kₘₐₓ) setup = (x = copy($x⁰));
+GDhist = @btime GD!(x, r, $f, $r!, $∇f!, $L, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰));
 # O comando setup garante que @btime não reutilize valores modificados de x⁰
 
 # ╔═╡ 649cfa2b-da5f-42c4-9063-1f173141b3e4
 begin
-# Plot do histórico	
+	# Plot do histórico
 	pGD = plot(xlabel=L"k", ylabel=L"f")
 	plot!(eachindex(GDhist), GDhist, label=L"f(x^k)", linewidth=2, color=:royalblue)
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
 end
 
+# ╔═╡ 0b31cf03-90ee-43ca-a76e-e5e0d128e362
+rCD!, ∇fᵢ = CDfuncs(A, γ);
+
 # ╔═╡ 5b12f767-fc85-4f48-a50d-73ddcc77b6c1
 # Tempo de execução
-
-CDhist = @btime CD!(x, $A, $b, $γ, $Lₘₐₓ, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰));
+CDhist = @btime CD!(x, r, $f, $rCD!, $∇fᵢ, $Lₘₐₓ, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰));
 
 # ╔═╡ 4887df3c-5539-45b9-b4eb-759ae4d80916
 begin
-
 	# Plot do histórico
 	pCD = plot(xlabel=L"k", ylabel=L"f")
 	plot!(eachindex(CDhist), CDhist, label=L"f(x^k)", linewidth=2, color=:royalblue)
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
+end
+
+# ╔═╡ 6da4145f-668a-4ed2-a2d6-051fa854ac0e
+begin
+	Thist  = Array{Float64}(undef, length(tests_list), 2)
+	
+	for i = 1:length(tests_list)
+		let
+			A, ftarget, b, γ, L, Lₘₐₓ = read_mat(path, tests_list[i][1]) # Leitura do .mat
+			r!, f, ∇f! = GDfuncs(A, b, γ) # Funções para o GD e f
+			rCD!, ∇fᵢ = CDfuncs(A, γ) # Funções para o CD
+			
+			# Iterado e resíduo iniciais
+			x⁰ = zeros(size(A, 2))
+			r⁰ = similar(b)
+			r!(r⁰, x⁰)
+
+			# Testes
+			statsGD = @benchmark GD!(x, r, $f, $r!, $∇f!, $L, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰))
+			statsCD = @benchmark CD!(x, r, $f, $rCD!, $∇fᵢ, $Lₘₐₓ, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰))
+
+			Thist[i, :] .= mean(statsGD.times), mean(statsCD.times)
+
+			@info "Tempos de execução médios do teste $(tests_list[i][1]):" GD=Thist[i, 1] CD=Thist[i, 2]
+		end 
+	end
+end
+
+# ╔═╡ 73d2fd11-8342-4460-8a92-08839e32c774
+begin
+	pPP = performance_profile(PlotsBackend(), Thist, ["Gradiente descendente", "Descenso coordenado"]; linewidth = 3)
+	plot!(pPP, dpi = 600, legend = :bottomright, title = "Perfil de desempenho de tempo de execução")
 end
 
 # ╔═╡ 4df672e6-3af1-48a7-9aa4-7a963566375e
@@ -249,6 +296,7 @@ html"""
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+BenchmarkProfiles = "ecbce9bc-3e5e-569d-9e29-55181f61f8d0"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -258,6 +306,7 @@ PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [compat]
+BenchmarkProfiles = "~0.4.6"
 BenchmarkTools = "~1.6.0"
 LaTeXStrings = "~1.4.0"
 MAT = "~0.10.7"
@@ -271,7 +320,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "cebd212be5ca1b3eec8c7a631caecd150a67ff3f"
+project_hash = "3becafb90e10fa199033c4ff74cbf80586b49fba"
 
 [[deps.AbstractPlutoDingetjes]]
 deps = ["Pkg"]
@@ -297,6 +346,12 @@ version = "1.11.0"
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
 
+[[deps.BenchmarkProfiles]]
+deps = ["CSV", "LaTeXStrings", "NaNMath", "Printf", "Requires", "Tables"]
+git-tree-sha1 = "12a9b512a72284f88b83d57db403629892cd0b96"
+uuid = "ecbce9bc-3e5e-569d-9e29-55181f61f8d0"
+version = "0.4.6"
+
 [[deps.BenchmarkTools]]
 deps = ["Compat", "JSON", "Logging", "Printf", "Profile", "Statistics", "UUIDs"]
 git-tree-sha1 = "e38fbc49a620f5d0b660d7f543db1009fe0f8336"
@@ -318,6 +373,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "1b96ea4a01afe0ea4090c5c8039690672dd13f2e"
 uuid = "6e34b625-4abd-537c-b88f-471c36dfa7a0"
 version = "1.0.9+0"
+
+[[deps.CSV]]
+deps = ["CodecZlib", "Dates", "FilePathsBase", "InlineStrings", "Mmap", "Parsers", "PooledArrays", "PrecompileTools", "SentinelArrays", "Tables", "Unicode", "WeakRefStrings", "WorkerUtilities"]
+git-tree-sha1 = "deddd8725e5e1cc49ee205a1964256043720a6c3"
+uuid = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+version = "0.10.15"
 
 [[deps.Cairo_jll]]
 deps = ["Artifacts", "Bzip2_jll", "CompilerSupportLibraries_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "JLLWrappers", "LZO_jll", "Libdl", "Pixman_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Zlib_jll", "libpng_jll"]
@@ -398,6 +459,11 @@ git-tree-sha1 = "4e1fe97fdaed23e9dc21d4d664bea76b65fc50a0"
 uuid = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 version = "0.18.22"
 
+[[deps.DataValueInterfaces]]
+git-tree-sha1 = "bfc1187b79289637fa0ef6d4436ebdfe6905cbd6"
+uuid = "e2d170a0-9d28-54be-80f0-106bbe20a464"
+version = "1.0.0"
+
 [[deps.Dates]]
 deps = ["Printf"]
 uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
@@ -455,6 +521,17 @@ git-tree-sha1 = "466d45dc38e15794ec7d5d63ec03d776a9aff36e"
 uuid = "b22a6f82-2f65-5046-a5b2-351ab43fb4e5"
 version = "4.4.4+1"
 
+[[deps.FilePathsBase]]
+deps = ["Compat", "Dates"]
+git-tree-sha1 = "3bab2c5aa25e7840a4b065805c0cdfc01f3068d2"
+uuid = "48062228-2e41-5def-b9a4-89aafe57970f"
+version = "0.9.24"
+weakdeps = ["Mmap", "Test"]
+
+    [deps.FilePathsBase.extensions]
+    FilePathsBaseMmapExt = "Mmap"
+    FilePathsBaseTestExt = "Test"
+
 [[deps.FileWatching]]
 uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
 version = "1.11.0"
@@ -487,6 +564,11 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "7a214fdac5ed5f59a22c2d9a885a16da1c74bbc7"
 uuid = "559328eb-81f9-559d-9380-de523a88c83c"
 version = "1.0.17+0"
+
+[[deps.Future]]
+deps = ["Random"]
+uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
+version = "1.11.0"
 
 [[deps.GLFW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Xorg_libXcursor_jll", "Xorg_libXi_jll", "Xorg_libXinerama_jll", "Xorg_libXrandr_jll", "libdecor_jll", "xkbcommon_jll"]
@@ -583,6 +665,19 @@ git-tree-sha1 = "b6d6bfdd7ce25b0f9b2f6b3dd56b2673a66c8770"
 uuid = "b5f81e59-6552-4d32-b1f0-c071b021bf89"
 version = "0.2.5"
 
+[[deps.InlineStrings]]
+git-tree-sha1 = "6a9fde685a7ac1eb3495f8e812c5a7c3711c2d5e"
+uuid = "842dd82b-1e85-43dc-bf29-5d0ee9dffc48"
+version = "1.4.3"
+
+    [deps.InlineStrings.extensions]
+    ArrowTypesExt = "ArrowTypes"
+    ParsersExt = "Parsers"
+
+    [deps.InlineStrings.weakdeps]
+    ArrowTypes = "31f734f8-188a-4ce0-8406-c8a06bd891cd"
+    Parsers = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
+
 [[deps.InteractiveUtils]]
 deps = ["Markdown"]
 uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
@@ -592,6 +687,11 @@ version = "1.11.0"
 git-tree-sha1 = "e2222959fbc6c19554dc15174c81bf7bf3aa691c"
 uuid = "92d709cd-6900-40b7-9082-c6be49f344b6"
 version = "0.2.4"
+
+[[deps.IteratorInterfaceExtensions]]
+git-tree-sha1 = "a3f24677c21f5bbe9d2a714f95dcd58337fb2856"
+uuid = "82899510-4779-5014-852e-03e436cf321d"
+version = "1.0.0"
 
 [[deps.JLFzf]]
 deps = ["REPL", "Random", "fzf_jll"]
@@ -965,6 +1065,12 @@ git-tree-sha1 = "d3de2694b52a01ce61a036f18ea9c0f61c4a9230"
 uuid = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 version = "0.7.62"
 
+[[deps.PooledArrays]]
+deps = ["DataAPI", "Future"]
+git-tree-sha1 = "36d8b4b899628fb92c2749eb488d884a926614d3"
+uuid = "2dfb63ee-cc39-5dd5-95bd-886bf059d720"
+version = "1.4.3"
+
 [[deps.PrecompileTools]]
 deps = ["Preferences"]
 git-tree-sha1 = "5aa36f7049a63a1528fe8f7c3f2113413ffd4e1f"
@@ -1064,6 +1170,12 @@ git-tree-sha1 = "3bac05bc7e74a75fd9cba4295cde4045d9fe2386"
 uuid = "6c6a2e73-6563-6170-7368-637461726353"
 version = "1.2.1"
 
+[[deps.SentinelArrays]]
+deps = ["Dates", "Random"]
+git-tree-sha1 = "712fb0231ee6f9120e005ccd56297abbc053e7e0"
+uuid = "91c51154-3ec4-41a3-a24f-3f23e20d615c"
+version = "1.4.8"
+
 [[deps.Serialization]]
 uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 version = "1.11.0"
@@ -1135,6 +1247,18 @@ version = "7.7.0+0"
 deps = ["Dates"]
 uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 version = "1.0.3"
+
+[[deps.TableTraits]]
+deps = ["IteratorInterfaceExtensions"]
+git-tree-sha1 = "c06b2f539df1c6efa794486abfb6ed2022561a39"
+uuid = "3783bdb8-4a98-5b6b-af9a-565f29a5fe9c"
+version = "1.0.1"
+
+[[deps.Tables]]
+deps = ["DataAPI", "DataValueInterfaces", "IteratorInterfaceExtensions", "OrderedCollections", "TableTraits"]
+git-tree-sha1 = "598cd7c1f68d1e205689b1c2fe65a9f85846f297"
+uuid = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
+version = "1.12.0"
 
 [[deps.Tar]]
 deps = ["ArgTools", "SHA"]
@@ -1224,6 +1348,17 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "5db3e9d307d32baba7067b13fc7b5aa6edd4a19a"
 uuid = "2381bf8a-dfd0-557d-9999-79630e7b1b91"
 version = "1.36.0+0"
+
+[[deps.WeakRefStrings]]
+deps = ["DataAPI", "InlineStrings", "Parsers"]
+git-tree-sha1 = "b1be2855ed9ed8eac54e5caff2afcdb442d52c23"
+uuid = "ea10d353-3f73-51f8-a26c-33c1cb351aa5"
+version = "1.4.2"
+
+[[deps.WorkerUtilities]]
+git-tree-sha1 = "cd1659ba0d57b71a464a29e64dbc67cfe83d54e7"
+uuid = "76eceee3-57b5-4d4a-8e66-0e911cebbf60"
+version = "1.6.1"
 
 [[deps.XML2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Zlib_jll"]
@@ -1503,18 +1638,24 @@ version = "1.8.1+0"
 # ╟─d0926a75-5e6f-4460-9cff-02d28c41be42
 # ╟─4f87749a-297f-4710-a3ab-5aa341adbbba
 # ╠═a304fcea-6898-465a-9736-cd52e9c48339
+# ╠═2aa34d12-1abe-4283-87d9-3ffcbc9d5a92
 # ╟─90124009-b5c1-45df-a7c8-b5fe334fb10e
 # ╠═097b00e3-42eb-4cbc-850f-f7103d7a8053
 # ╟─37ac9560-32cb-4b9c-9937-b9b838c22b52
-# ╠═52f82104-1edd-46e0-833c-7f32ec3fd19f
 # ╠═e96cba24-d34e-49d8-9d89-bcb3074578f6
+# ╠═52f82104-1edd-46e0-833c-7f32ec3fd19f
+# ╠═05446cb9-b59f-475a-ab51-e883d3576c53
 # ╠═3242e3ea-90f5-4e71-9cbe-f7b3788168df
 # ╠═649cfa2b-da5f-42c4-9063-1f173141b3e4
 # ╟─f3217d91-76c4-4b3d-8599-5b8d3e126058
-# ╠═fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
 # ╠═48c67201-e79a-4719-aba3-ec94547cd3c8
+# ╠═fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
+# ╠═0b31cf03-90ee-43ca-a76e-e5e0d128e362
 # ╠═5b12f767-fc85-4f48-a50d-73ddcc77b6c1
 # ╠═4887df3c-5539-45b9-b4eb-759ae4d80916
+# ╟─b928572d-5aa0-4a7d-a81a-5c31c406f033
+# ╠═6da4145f-668a-4ed2-a2d6-051fa854ac0e
+# ╠═73d2fd11-8342-4460-8a92-08839e32c774
 # ╟─d97e95cc-f895-4521-b23a-f7a9267f54a9
 # ╠═9f4351d7-9b4f-429c-83f2-056458683b88
 # ╠═4df672e6-3af1-48a7-9aa4-7a963566375e
