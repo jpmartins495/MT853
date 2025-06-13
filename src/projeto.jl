@@ -21,8 +21,12 @@ begin
 	using LinearAlgebra
 	# struct de matrizes esparsas
 	using SparseArrays
+	# Variáveis aleatórias
+	using Random
 	# Elementos interativos
 	using PlutoUI
+	# Função para elementos interativos que precisa ser importada separadamente
+	using PlutoUI: combine
 	# Leitura de dados
 	using MAT
 	# Gráficos
@@ -122,7 +126,7 @@ md"""
 """
 
 # ╔═╡ 48c67201-e79a-4719-aba3-ec94547cd3c8
-function CD!(x:: Array{<:Number}, r, f:: Function, r!:: Function, ∇fᵢ:: Function, Lₘₐₓ:: Number, ftarget:: Number, kₘₐₓ:: Int)
+function CD!(x:: Array{<:Number}, r, f:: Function, r!:: Function, ∇fᵢ:: Function, indexF:: Function, Lₘₐₓ:: Number, ftarget:: Number, kₘₐₓ:: Int)
     n = length(x)
 
     # Histórico de iterados em valor objetivo
@@ -131,8 +135,7 @@ function CD!(x:: Array{<:Number}, r, f:: Function, r!:: Function, ∇fᵢ:: Func
     
     k = 1
     while true
-		for j = 1:n
-	        i = rand(1:n)
+		for i = indexF(n)
 			# Tamanho do passo
 	        δ = -∇fᵢ(x, r, i)/Lₘₐₓ
 			# Atualização do iterado
@@ -153,6 +156,14 @@ function CD!(x:: Array{<:Number}, r, f:: Function, r!:: Function, ∇fᵢ:: Func
     end
 
 end;
+
+# ╔═╡ 1ec88fd7-217d-4fb4-bef5-417e30eff290
+md"""
+Também definimos abaixo a função que retorna os índices que serão usados pelo descenso coordenado por $n$ iterações internas. Na versão original do método, esses índices são escolhidos de forma randômica dentre todos os possíveis índices, i.e., no *range* $[1,n]$ em que $n=|A_{i,\cdot}|$ é a dimensão do domínio de $f:\mathbb{R}^n\to\mathbb{R}^m$.
+"""
+
+# ╔═╡ 4313ab4f-8035-4229-a9ce-d6c3427e8334
+indexCD(n:: Int) = rand(1:n, n);
 
 # ╔═╡ fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
 function CDfuncs(A:: SparseMatrixCSC{<:Number, <:Integer}, γ:: Number)
@@ -181,6 +192,20 @@ end;
 md"""
 ### Perfil de desempenho
 """
+
+# ╔═╡ 9b0be7dd-a578-4e35-afcc-5f02111e7b41
+md"""
+Para o perfil de desempenho, também serão testadas duas outras versões de descenso coordenado: o cíclico e o permutado. A versão cíclica escolhe os índices para atualização durante uma iteração seguindo a ordem cardinal. Já a versão permutada escolhe os índices a partir de uma pertmutação de $[1,n]$. As funções para gerar os índices estão definidas abaixo.
+"""
+
+# ╔═╡ 8dda73a0-f0e6-4452-924c-09d40a731ddf
+begin
+	# Ordem de atualização cíclica
+	indexCicl(n:: Int) = 1:n
+	
+	# Ordem de atualização permutada
+	indexPerm(n:: Int) = randperm(n)
+end;
 
 # ╔═╡ d97e95cc-f895-4521-b23a-f7a9267f54a9
 md"""
@@ -226,7 +251,7 @@ rCD!, ∇fᵢ = CDfuncs(A, γ);
 
 # ╔═╡ 5b12f767-fc85-4f48-a50d-73ddcc77b6c1
 # Tempo de execução
-CDhist = @btime CD!(x, r, $f, $rCD!, $∇fᵢ, $Lₘₐₓ, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰));
+CDhist = @btime CD!(x, r, $f, $rCD!, $∇fᵢ, $indexCD, $Lₘₐₓ, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰));
 
 # ╔═╡ 4887df3c-5539-45b9-b4eb-759ae4d80916
 begin
@@ -238,7 +263,7 @@ end
 
 # ╔═╡ 6da4145f-668a-4ed2-a2d6-051fa854ac0e
 begin
-	Thist  = Array{Float64}(undef, length(tests_list), 2)
+	Thist  = Array{Float64}(undef, length(tests_list), 4)
 	
 	for i = 1:length(tests_list)
 		let
@@ -253,19 +278,15 @@ begin
 
 			# Testes
 			statsGD = @benchmark GD!(x, r, $f, $r!, $∇f!, $L, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰))
-			statsCD = @benchmark CD!(x, r, $f, $rCD!, $∇fᵢ, $Lₘₐₓ, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰))
+			statsCD = @benchmark CD!(x, r, $f, $rCD!, $∇fᵢ, $indexCD, $Lₘₐₓ, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰))
+			statsCicl = @benchmark CD!(x, r, $f, $rCD!, $∇fᵢ, $indexCicl, $Lₘₐₓ, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰))
+			statsPerm = @benchmark CD!(x, r, $f, $rCD!, $∇fᵢ, $indexPerm, $Lₘₐₓ, $ftarget, $kₘₐₓ) setup = (x=copy($x⁰); r=copy($r⁰))
 
-			Thist[i, :] .= mean(statsGD.times), mean(statsCD.times)
+			Thist[i, :] .= mean(statsGD.times), mean(statsCD.times), mean(statsCicl.times), mean(statsPerm.times) 
 
-			@info "Tempos de execução médios do teste $(tests_list[i][1]):" GD=Thist[i, 1] CD=Thist[i, 2]
+			@info "Tempos de execução médios do teste $(tests_list[i][1]):" GD=Thist[i, 1] CD=Thist[i, 2] Cicl=Thist[i, 3] Perm=Thist[i, 4]
 		end 
 	end
-end
-
-# ╔═╡ 73d2fd11-8342-4460-8a92-08839e32c774
-begin
-	pPP = performance_profile(PlotsBackend(), Thist, ["Gradiente descendente", "Descenso coordenado"]; linewidth = 3)
-	plot!(pPP, dpi = 600, legend = :bottomright, title = "Perfil de desempenho de tempo de execução")
 end
 
 # ╔═╡ 4df672e6-3af1-48a7-9aa4-7a963566375e
@@ -293,6 +314,44 @@ html"""
 </style>
 """
 
+# ╔═╡ 15232fe5-5d5d-4413-9876-da1fdf3908c4
+method_names = ["Gradiente descendente", "Descenso coordenado", "Gradiente cíclico", "Gradiente permutado"];
+
+# ╔═╡ 8f0070f2-6a76-4076-9790-250a4beab08d
+function toggle_methods(methods:: Vector)
+	
+	return combine() do Child
+		
+		inputs = [
+			md""" $(method): $(
+				Child(String(method), CheckBox(default = true))
+			)"""
+			
+			for method in methods
+		]
+		
+		md"""
+		Métodos plotados:
+		$(inputs)
+		"""
+	end
+end;
+
+# ╔═╡ 7367fac3-2979-4f17-8f2f-8acb75780491
+md"""
+$(@bind toggled toggle_methods(method_names))
+"""
+
+# ╔═╡ a5c53e91-93ec-437d-b17d-4be1c030edea
+# Lista de colunas a serem plotadas
+plotted = [i for i = eachindex(method_names) if toggled[Symbol(method_names[i])]]; 
+
+# ╔═╡ 73d2fd11-8342-4460-8a92-08839e32c774
+begin
+	pPP = performance_profile(PlotsBackend(), Thist[:, plotted], method_names[plotted]; linewidth = 3)
+	plot!(pPP, dpi = 600, legend = :bottomright, title = "Perfil de desempenho de tempo de execução")
+end
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
@@ -303,6 +362,7 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MAT = "23992714-dd62-5051-b70f-ba57cb901cac"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [compat]
@@ -320,7 +380,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "3becafb90e10fa199033c4ff74cbf80586b49fba"
+project_hash = "c6a492b89c3b0b93479508dd401bfc796620c172"
 
 [[deps.AbstractPlutoDingetjes]]
 deps = ["Pkg"]
@@ -1649,15 +1709,23 @@ version = "1.8.1+0"
 # ╠═649cfa2b-da5f-42c4-9063-1f173141b3e4
 # ╟─f3217d91-76c4-4b3d-8599-5b8d3e126058
 # ╠═48c67201-e79a-4719-aba3-ec94547cd3c8
+# ╟─1ec88fd7-217d-4fb4-bef5-417e30eff290
+# ╠═4313ab4f-8035-4229-a9ce-d6c3427e8334
 # ╠═fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
 # ╠═0b31cf03-90ee-43ca-a76e-e5e0d128e362
 # ╠═5b12f767-fc85-4f48-a50d-73ddcc77b6c1
 # ╠═4887df3c-5539-45b9-b4eb-759ae4d80916
 # ╟─b928572d-5aa0-4a7d-a81a-5c31c406f033
+# ╟─9b0be7dd-a578-4e35-afcc-5f02111e7b41
+# ╠═8dda73a0-f0e6-4452-924c-09d40a731ddf
 # ╠═6da4145f-668a-4ed2-a2d6-051fa854ac0e
+# ╟─7367fac3-2979-4f17-8f2f-8acb75780491
 # ╠═73d2fd11-8342-4460-8a92-08839e32c774
 # ╟─d97e95cc-f895-4521-b23a-f7a9267f54a9
 # ╠═9f4351d7-9b4f-429c-83f2-056458683b88
 # ╠═4df672e6-3af1-48a7-9aa4-7a963566375e
+# ╠═15232fe5-5d5d-4413-9876-da1fdf3908c4
+# ╠═8f0070f2-6a76-4076-9790-250a4beab08d
+# ╠═a5c53e91-93ec-437d-b17d-4be1c030edea
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
