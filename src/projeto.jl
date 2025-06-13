@@ -60,14 +60,21 @@ end;
 # ╔═╡ 90124009-b5c1-45df-a7c8-b5fe334fb10e
 md"""
 ### Parâmetros do problema e inicialização
-O parâmetro `kₘₐₓ =` $(@bind kₘₐₓ NumberField(100:100:10000; default = 10000)) determina o número máximo de iterações para o método do gradiente. 
+
+O parâmetro `kₘₐₓ =` $(@bind kₘₐₓ NumberField(100:100:10000; default = 10000)) determina o número máximo de iterações para o método do gradiente.  
 
 Já para o método do descenso coordenado, como $n$ iterações equivalem em média a uma iteração do gradiente, tomamos `n⋅kₘₐₓ` como número máximo de iterações.
+
+O iterado inicial $x^0$ foi tomado como a origem, e também é calculado o resíduo inicial $r^0$ (veja ($\text{r}$)).
 """
 
 # ╔═╡ 37ac9560-32cb-4b9c-9937-b9b838c22b52
 md"""
 ### Método do gradiente
+O gradiente descendente é efetuado pela função `GD!`, que recebe o iterado inicial e o resíduo inicial. A cada iteração é dado o passo
+
+$$x^{k+1}=x^k-\frac{1}{L}\nabla f(x^k)$$
+e conferidos os critérios de parada do valor objetivo desejado e do número máximo de iterações (`fx ≤ ftarget` e `k ≥ kₘₐₓ`).
 """
 
 # ╔═╡ e96cba24-d34e-49d8-9d89-bcb3074578f6
@@ -99,6 +106,20 @@ function GD!(x:: Array{<:Number}, r, f:: Function, r!:: Function, ∇f!:: Functi
     end
 end;
 
+# ╔═╡ 0398272e-f8ed-49db-af8c-8deea9b4d0f9
+md"""
+Para avaliar $f$ e $\nabla f$ de forma a evitar cálculos repetidos, primeiro é definido o resíduo na iteração $k$ como
+
+$$r^k\coloneqq Ax^k-b.$$
+A partir desse vetor, é possível calcular
+
+$$f(x^k)=\frac{1}{2}\|r^k\|^2+\frac{\gamma}{2}\|x^k\|^2$$
+e
+
+$$\nabla f(x^k)=A'r^k+\gamma x^k.$$
+Essas funções são definidas pela função `GDfuncs`.
+"""
+
 # ╔═╡ 52f82104-1edd-46e0-833c-7f32ec3fd19f
 function GDfuncs(A:: SparseMatrixCSC{<:Number, <:Integer}, b:: Array{<:Number}, γ:: Number) 
 	# Atualização do resíduo
@@ -120,10 +141,24 @@ function GDfuncs(A:: SparseMatrixCSC{<:Number, <:Integer}, b:: Array{<:Number}, 
 	return r!, f, ∇f!
 end;
 
+# ╔═╡ 353b5f5f-91e1-448f-84e0-118d6e2b8dcc
+md"""
+A seguir está o *benchmark* desse método aplicado ao problema selecionado e o gráfico de $f(x^k)$ a cada iteração. 
+"""
+
 # ╔═╡ f3217d91-76c4-4b3d-8599-5b8d3e126058
 md"""
 ### Método do descenso coordenado
+O descenso coordenado é efetuado pela função `CD!`, que recebe o iterado inicial e o resíduo inicial. A cada iteração é dado o passo
+
+$$x^{k+1}_{i_k}=x^k_{i_k}-\frac{\nabla_{i_k} f(x^k)}{L_{max}}\tag{CD}$$
+na coordenada $i_k$ escolhida na iteração $k$. Os critérios de parada só são conferidos a cada $n$ iterações do método, o que é efetuado com um laço `for` dentro de cada iteração.
+
+Também definimos abaixo a função que retorna os índices que serão usados pelo descenso coordenado por $n$ iterações internas. Na versão original do método, esses índices são escolhidos de forma randômica no *range* `1:n` de todos os possíveis índices.
 """
+
+# ╔═╡ 4313ab4f-8035-4229-a9ce-d6c3427e8334
+indexCD(n:: Int) = rand(1:n, n);
 
 # ╔═╡ 48c67201-e79a-4719-aba3-ec94547cd3c8
 function CD!(x:: Array{<:Number}, r, f:: Function, r!:: Function, ∇fᵢ:: Function, indexF:: Function, Lₘₐₓ:: Number, ftarget:: Number, kₘₐₓ:: Int)
@@ -157,13 +192,23 @@ function CD!(x:: Array{<:Number}, r, f:: Function, r!:: Function, ∇fᵢ:: Func
 
 end;
 
-# ╔═╡ 1ec88fd7-217d-4fb4-bef5-417e30eff290
+# ╔═╡ ae3a2487-41f8-4355-b460-3368930f073b
 md"""
-Também definimos abaixo a função que retorna os índices que serão usados pelo descenso coordenado por $n$ iterações internas. Na versão original do método, esses índices são escolhidos de forma randômica dentre todos os possíveis índices, i.e., no *range* $[1,n]$ em que $n=|A_{i,\cdot}|$ é a dimensão do domínio de $f:\mathbb{R}^n\to\mathbb{R}^m$.
-"""
+Pela atualização ($\text{CD}$), o resíduo na iteração $k+1$ pode ser atualizado através da realação
 
-# ╔═╡ 4313ab4f-8035-4229-a9ce-d6c3427e8334
-indexCD(n:: Int) = rand(1:n, n);
+$$r^{k+1} = Ax^{k+1} - b = A(x^k  -\frac{\nabla_{i_k} f(x^k)}{L_{max}} e_{i_k}) - b. $$
+Assim,
+
+$$r^{k+1} = A(x^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} e_{i_k}) - b = r^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} A e_{i_k} = r^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} A_{\cdot,i_k},$$
+em que $A_{\cdot,i_k}$ é $i_k $-ésima coluna de $A$. 
+
+Para implementar essa atualização de forma eficiente, é necessário se aproveitar da estrutura de armazenamento da matriz esparsa por colunas $A$ (`SparseMatrixCSC`). O *range* ` A.colptr[i]:A.colptr[i+1]-1` contém os índices em `A.rowval` e `A.nzval` referentes aos elementos da coluna $A_{\cdot,i}$. Já `A.nzval` contém os valores das entradas da matriz, e `A.rowval` a linha na qual esses elementos se encontram. Dessa forma, atualizamos a coordenada `A.rowval[j]` de $r^k$ com o valor `A.nzval[j]` para todo `j` em ` A.colptr[i]:A.colptr[i+1]-1`.
+
+Além disso, como 
+
+$$\nabla_{i_k} f(x^k)=A_{\cdot,i_k}'r^k+\gamma x_{i_k},$$
+a $i_k$-ésima coornada do gradiente também pode ser implementada de forma eficiente ao transformar o produto $A_{\cdot,i_k}'r^k$ em outro laço `for` em ` A.colptr[i]:A.colptr[i+1]-1`, se aproveitando novamente da esparsidade de $A_{\cdot,i_k}$.
+"""
 
 # ╔═╡ fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
 function CDfuncs(A:: SparseMatrixCSC{<:Number, <:Integer}, γ:: Number)
@@ -188,14 +233,16 @@ function CDfuncs(A:: SparseMatrixCSC{<:Number, <:Integer}, γ:: Number)
 	return rCD!, ∇fᵢ
 end;
 
-# ╔═╡ b928572d-5aa0-4a7d-a81a-5c31c406f033
+# ╔═╡ bea1425c-33a9-428e-b6a2-da4390fd70c0
 md"""
-### Perfil de desempenho
+A seguir está o *benchmark* desse método aplicado ao problema selecionado e o gráfico de $f(x^k)$ a cada iteração. Em todos os problemas teste, o número de iterações totais do descenso coordenado é menor que o do método do gradiente. Isso provavelmente se dá pelo maior tamanho de passo tomado ($L_{max}\leq L$) e também pela sua natureza coordenada. Analogamente ao método de Gauss-Seidel em comparação ao de Jacobi, ao invés de tomar um passo com o gradiente inteiro, o método coordenado efetua uma atualização em uma coordenada antes de calcular a próxima componente do gradiente. Assim, os passos são sempre tomados com um gradiente que melhor reflete o novo estado do iterado, prossivelmente acelerando a convergência.
 """
 
 # ╔═╡ 9b0be7dd-a578-4e35-afcc-5f02111e7b41
 md"""
-Para o perfil de desempenho, também serão testadas duas outras versões de descenso coordenado: o cíclico e o permutado. A versão cíclica escolhe os índices para atualização durante uma iteração seguindo a ordem cardinal. Já a versão permutada escolhe os índices a partir de uma pertmutação de $[1,n]$. As funções para gerar os índices estão definidas abaixo.
+### Comparação entre os métodos
+
+Para o perfil de desempenho e análise dos métodos, também serão testadas duas outras versões de descenso coordenado: o cíclico e o permutado. A versão cíclica escolhe os índices para atualização seguindo a ordem cardinal. Já a versão permutada escolhe os índices a partir de uma pertmutação de $\{1,2,..., n\}$. As funções para gerar os índices estão definidas abaixo.
 """
 
 # ╔═╡ 8dda73a0-f0e6-4452-924c-09d40a731ddf
@@ -207,9 +254,19 @@ begin
 	indexPerm(n:: Int) = randperm(n)
 end;
 
+# ╔═╡ edfa378d-097d-437f-bda3-9d6f09751f31
+md"""
+O laço abaixo executa todos os métodos para cada problema teste e salva o tempo médio de execução obtido com o *benchmark*.
+"""
+
+# ╔═╡ 1b2d7942-6eb8-4c39-8efe-1ee7fe4cd1a7
+md"""
+### Análise dos resultados
+"""
+
 # ╔═╡ d97e95cc-f895-4521-b23a-f7a9267f54a9
 md"""
-### Código adicional para rodar o caderno
+### Código adicional para executar o caderno
 """
 
 # ╔═╡ 9f4351d7-9b4f-429c-83f2-056458683b88
@@ -217,6 +274,14 @@ tests_list = [file => file[begin:end-8] for file = readdir(path)];
 
 # ╔═╡ 4f87749a-297f-4710-a3ab-5aa341adbbba
 md"""
+O problema de interesse é de *ridge regression*, em que é minimizado uma função $f:\mathbb{R}^n\to\mathbb{R}$ que envolve um termo quadrático mais uma regularização com a norma $\ell_2$ que induz soluções pequenas. O problema é caracterizado por
+
+$$\min_{x\in\mathbb{R}^n}f(x)=\min_{x\in\mathbb{R}^n}\frac{1}{2}\|Ax-b\|^2+\frac{\gamma}{2}\|x\|^2,$$
+
+em que $A\in\mathbb{R}^{m\times n}$, $b\in\mathbb{R}^m$, e $\gamma>0$ é o parâmetro de penalização.
+
+Para ler os dados, é definida a função `read_mat` abaixo que usa `matread` e depois retorna os parâmetros do problema. Os dados também incluem $L=\lambda_{max}(A'A)+1$, a constante de $L$-suavidade do problema, $L_{max}$, a constante de suavidade máxima por coordenada, e $f_{target}$, o valor objetivo usado para o critério de parada $f(x^k)\leq f_{target}$.
+
 Selecione o nome da instância de teste: `test =` $(@bind test Select(tests_list)).
 """
 
@@ -241,7 +306,7 @@ GDhist = @btime GD!(x, r, $f, $r!, $∇f!, $L, $ftarget, $kₘₐₓ) setup = (x
 # ╔═╡ 649cfa2b-da5f-42c4-9063-1f173141b3e4
 begin
 	# Plot do histórico
-	pGD = plot(xlabel=L"k", ylabel=L"f")
+	pGD = plot(xlabel=L"k", ylabel=L"f", title=L"f(x^k)\ vs.\ f_{target}\ para\ o\ método\ do\ gradiente")
 	plot!(eachindex(GDhist), GDhist, label=L"f(x^k)", linewidth=2, color=:royalblue)
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
 end
@@ -256,7 +321,7 @@ CDhist = @btime CD!(x, r, $f, $rCD!, $∇fᵢ, $indexCD, $Lₘₐₓ, $ftarget, 
 # ╔═╡ 4887df3c-5539-45b9-b4eb-759ae4d80916
 begin
 	# Plot do histórico
-	pCD = plot(xlabel=L"k", ylabel=L"f")
+	pCD = plot(xlabel=L"k", ylabel=L"f", title=L"f(x^k)\ vs.\ f_{target}\ para\ o\ descenso\ coordenado")
 	plot!(eachindex(CDhist), CDhist, label=L"f(x^k)", linewidth=2, color=:royalblue)
 	hline!([ftarget], label=L"f_{target}", linewidth=2, linestyle=:dash, color=:red, alpha=0.7)
 end
@@ -331,7 +396,7 @@ function toggle_methods(methods:: Vector)
 		]
 		
 		md"""
-		Métodos plotados:
+		Métodos *plotados*:
 		$(inputs)
 		"""
 	end
@@ -339,6 +404,8 @@ end;
 
 # ╔═╡ 7367fac3-2979-4f17-8f2f-8acb75780491
 md"""
+O perfil de desempenho abaixo compara todos os métodos para os 6 problemas testados. É possível selecionar quais métodos são *plotados* para melhor comparar um subconjunto dos métodos.
+
 $(@bind toggled toggle_methods(method_names))
 """
 
@@ -346,7 +413,7 @@ $(@bind toggled toggle_methods(method_names))
 # Lista de colunas a serem plotadas
 plotted = [i for i = eachindex(method_names) if toggled[Symbol(method_names[i])]]; 
 
-# ╔═╡ 73d2fd11-8342-4460-8a92-08839e32c774
+# ╔═╡ 3df8870b-f084-487b-9a24-6da45887543f
 begin
 	pPP = performance_profile(PlotsBackend(), Thist[:, plotted], method_names[plotted]; linewidth = 3)
 	plot!(pPP, dpi = 600, legend = :bottomright, title = "Perfil de desempenho de tempo de execução")
@@ -1703,24 +1770,28 @@ version = "1.8.1+0"
 # ╠═097b00e3-42eb-4cbc-850f-f7103d7a8053
 # ╟─37ac9560-32cb-4b9c-9937-b9b838c22b52
 # ╠═e96cba24-d34e-49d8-9d89-bcb3074578f6
+# ╟─0398272e-f8ed-49db-af8c-8deea9b4d0f9
 # ╠═52f82104-1edd-46e0-833c-7f32ec3fd19f
 # ╠═05446cb9-b59f-475a-ab51-e883d3576c53
+# ╟─353b5f5f-91e1-448f-84e0-118d6e2b8dcc
 # ╠═3242e3ea-90f5-4e71-9cbe-f7b3788168df
-# ╠═649cfa2b-da5f-42c4-9063-1f173141b3e4
+# ╟─649cfa2b-da5f-42c4-9063-1f173141b3e4
 # ╟─f3217d91-76c4-4b3d-8599-5b8d3e126058
-# ╠═48c67201-e79a-4719-aba3-ec94547cd3c8
-# ╟─1ec88fd7-217d-4fb4-bef5-417e30eff290
 # ╠═4313ab4f-8035-4229-a9ce-d6c3427e8334
+# ╠═48c67201-e79a-4719-aba3-ec94547cd3c8
+# ╟─ae3a2487-41f8-4355-b460-3368930f073b
 # ╠═fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
 # ╠═0b31cf03-90ee-43ca-a76e-e5e0d128e362
+# ╟─bea1425c-33a9-428e-b6a2-da4390fd70c0
 # ╠═5b12f767-fc85-4f48-a50d-73ddcc77b6c1
-# ╠═4887df3c-5539-45b9-b4eb-759ae4d80916
-# ╟─b928572d-5aa0-4a7d-a81a-5c31c406f033
+# ╟─4887df3c-5539-45b9-b4eb-759ae4d80916
 # ╟─9b0be7dd-a578-4e35-afcc-5f02111e7b41
 # ╠═8dda73a0-f0e6-4452-924c-09d40a731ddf
+# ╟─edfa378d-097d-437f-bda3-9d6f09751f31
 # ╠═6da4145f-668a-4ed2-a2d6-051fa854ac0e
 # ╟─7367fac3-2979-4f17-8f2f-8acb75780491
-# ╠═73d2fd11-8342-4460-8a92-08839e32c774
+# ╟─3df8870b-f084-487b-9a24-6da45887543f
+# ╟─1b2d7942-6eb8-4c39-8efe-1ee7fe4cd1a7
 # ╟─d97e95cc-f895-4521-b23a-f7a9267f54a9
 # ╠═9f4351d7-9b4f-429c-83f2-056458683b88
 # ╠═4df672e6-3af1-48a7-9aa4-7a963566375e
