@@ -74,7 +74,7 @@ md"""
 O gradiente descendente é efetuado pela função `GD!`, que recebe o iterado inicial e o resíduo inicial. A cada iteração é dado o passo
 
 $$x^{k+1}=x^k-\frac{1}{L}\nabla f(x^k)$$
-e conferidos os critérios de parada do valor objetivo desejado e do número máximo de iterações (`fx ≤ ftarget` e `k ≥ kₘₐₓ`).
+e são conferidos os critérios de parada do valor objetivo desejado e do número máximo de iterações (`fx ≤ ftarget` e `k ≥ kₘₐₓ`).
 """
 
 # ╔═╡ e96cba24-d34e-49d8-9d89-bcb3074578f6
@@ -149,12 +149,12 @@ A seguir está o *benchmark* desse método aplicado ao problema selecionado e o 
 # ╔═╡ f3217d91-76c4-4b3d-8599-5b8d3e126058
 md"""
 ### Método do descenso coordenado
-O descenso coordenado é efetuado pela função `CD!`, que recebe o iterado inicial e o resíduo inicial. A cada iteração é dado o passo
+O descenso coordenado é efetuado pela função `CD!`, que recebe o iterado inicial e o resíduo inicial. Na iteração $k$, é escolhida uma coordenada $i_k$ e é dado o passo
 
-$$x^{k+1}_{i_k}=x^k_{i_k}-\frac{\nabla_{i_k} f(x^k)}{L_{max}}\tag{CD}$$
-na coordenada $i_k$ escolhida na iteração $k$. Os critérios de parada só são conferidos a cada $n$ iterações do método, o que é efetuado com um laço `for` dentro de cada iteração.
+$$x^{k+1}_{i_k}=x^k_{i_k}-\frac{\nabla_{i_k} f(x^k)}{L_{max}}\tag{CD}.$$
+Cada uma dessas iterações custa, aproximadamente, $n$ vezes menos que uma iteração do método do gradiente, que atualiza todas as coordenadas de uma vez. Por isso, para fins de comparação, vamos nos referir a cada lote de $n$ atualizações de coordenadas como uma única iteração do método do descenso coordenado. Também por isso, o critério de parada só é checado a cada $n$ atualizações de coordenadas. No código a seguir, essas atualizações são efetuadas, para cada $k$, dentro de um laço *for*.
 
-Também definimos abaixo a função que retorna os índices que serão usados pelo descenso coordenado por $n$ iterações internas. Na versão original do método, esses índices são escolhidos de forma randômica no *range* `1:n` de todos os possíveis índices.
+Também definimos abaixo a função que retorna os índices que serão usados pelo descenso coordenado nas $n$ iterações internas. Na versão original do método, esses índices são escolhidos de forma aleatória no *range* `1:n` de todos os possíveis índices.
 """
 
 # ╔═╡ 4313ab4f-8035-4229-a9ce-d6c3427e8334
@@ -200,14 +200,14 @@ $$r^{k+1} = Ax^{k+1} - b = A(x^k  -\frac{\nabla_{i_k} f(x^k)}{L_{max}} e_{i_k}) 
 Assim,
 
 $$r^{k+1} = A(x^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} e_{i_k}) - b = r^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} A e_{i_k} = r^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} A_{\cdot,i_k},$$
-em que $A_{\cdot,i_k}$ é $i_k $-ésima coluna de $A$. 
+em que $A_{\cdot,i_k}$ é $i_k $-ésima coluna de $A$. Desse modo, só é preciso atualizar as coordenadas do resíduo correspondentes às entradas não nulas de $A_{\cdot, i_k}$, o que sugere que o método pode ser vantajoso no caso em que $A$ é uma matriz esparsa, que é o caso das instâncias de teste.
 
-Para implementar essa atualização de forma eficiente, é necessário se aproveitar da estrutura de armazenamento da matriz esparsa por colunas $A$ (`SparseMatrixCSC`). O *range* ` A.colptr[i]:A.colptr[i+1]-1` contém os índices em `A.rowval` e `A.nzval` referentes aos elementos da coluna $A_{\cdot,i}$. Já `A.nzval` contém os valores das entradas da matriz, e `A.rowval` a linha na qual esses elementos se encontram. Dessa forma, atualizamos a coordenada `A.rowval[j]` de $r^k$ com o valor `A.nzval[j]` para todo `j` em ` A.colptr[i]:A.colptr[i+1]-1`.
+Para se aproveitar da estrutura esparsa da matriz $A$ e implementar de forma eficiente a atualização do resíduo, é preciso entender o formato CSC (*Compressed Sparse Column*) em que a matriz está armazenada. A $i$-ésima coluna de $A$ está armazenada no *range* ` A.colptr[i]:A.colptr[i+1]-1`. Então, para $j$ nesse *range*, os valores não nulos nessa coluna podem ser acessados através de `A.nzval[j]`. Já `A.rowval[j]` traz o índice da coluna correspondente a esse valor. Dessa forma, atualizamos a coordenada `A.rowval[j]` de $r^k$ com o valor `A.nzval[j]` para todo `j` em ` A.colptr[i]:A.colptr[i+1]-1`.
 
 Além disso, como 
 
 $$\nabla_{i_k} f(x^k)=A_{\cdot,i_k}'r^k+\gamma x_{i_k},$$
-a $i_k$-ésima coornada do gradiente também pode ser implementada de forma eficiente ao transformar o produto $A_{\cdot,i_k}'r^k$ em outro laço `for` em ` A.colptr[i]:A.colptr[i+1]-1`, se aproveitando novamente da esparsidade de $A_{\cdot,i_k}$.
+a $i_k$-ésima coornada do gradiente também pode ser implementada de forma eficiente ao transformar o produto $A_{\cdot,i_k}'r^k$ em outro laço `for` em ` A.colptr[i]:A.colptr[i+1]-1`, se aproveitando novamente da esparsidade de $A_{\cdot,i_k}.$
 """
 
 # ╔═╡ fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
@@ -235,14 +235,14 @@ end;
 
 # ╔═╡ bea1425c-33a9-428e-b6a2-da4390fd70c0
 md"""
-A seguir está o *benchmark* desse método aplicado ao problema selecionado e o gráfico de $f(x^k)$ a cada iteração. Em todos os problemas teste, o número de iterações totais do descenso coordenado é menor que o do método do gradiente. Isso provavelmente se dá pelo maior tamanho de passo tomado ($L_{max}\leq L$) e também pela sua natureza coordenada. Analogamente ao método de Gauss-Seidel em comparação ao de Jacobi, ao invés de tomar um passo com o gradiente inteiro, o método coordenado efetua uma atualização em uma coordenada antes de calcular a próxima componente do gradiente. Assim, os passos são sempre tomados com um gradiente que melhor reflete o novo estado do iterado, prossivelmente acelerando a convergência.
+A seguir está o *benchmark* desse método aplicado ao problema selecionado e o gráfico de $f(x^k)$ a cada iteração. Em todos os problemas teste, o número de iterações totais do descenso coordenado (lembrando que cada uma equivale a $n$ atualizações de coordenadas) é menor que o do método do gradiente. Isso provavelmente se dá pelo maior tamanho de passo tomado ($L_{max}\leq L$) e também pela sua natureza coordenada. Analogamente ao método de Gauss-Seidel em comparação ao de Jacobi, ao invés de tomar um passo com o gradiente inteiro, o método coordenado efetua uma atualização em uma coordenada antes de calcular a próxima componente do gradiente. Assim, os passos são sempre tomados com um gradiente que melhor reflete o novo estado do iterado, prossivelmente acelerando a convergência.
 """
 
 # ╔═╡ 9b0be7dd-a578-4e35-afcc-5f02111e7b41
 md"""
 ### Comparação entre os métodos
 
-Para o perfil de desempenho e análise dos métodos, também serão testadas duas outras versões de descenso coordenado: o cíclico e o permutado. A versão cíclica escolhe os índices para atualização seguindo a ordem cardinal. Já a versão permutada escolhe os índices a partir de uma pertmutação de $\{1,2,..., n\}$. As funções para gerar os índices estão definidas abaixo.
+Para o perfil de desempenho e análise dos métodos, também serão testadas duas outras versões de descenso coordenado: o cíclico e o permutado. A versão cíclica escolhe os índices para atualização seguindo a ordem cardinal. Já a versão permutada escolhe os índices a partir de uma pertmutação aleatória de $\{1,2,..., n\}$. Note que isso é diferente da versão original, já que não permite repetições de índices. As funções para gerar os índices estão definidas abaixo.
 """
 
 # ╔═╡ 8dda73a0-f0e6-4452-924c-09d40a731ddf
@@ -262,6 +262,16 @@ O laço abaixo executa todos os métodos para cada problema teste e salva o temp
 # ╔═╡ 1b2d7942-6eb8-4c39-8efe-1ee7fe4cd1a7
 md"""
 ### Análise dos resultados
+
+Ao comparar apenas o método do gradiente (GD) com o método do descenso coordenado original (CD), ou seja, o que escolhe um índice aleatoriamente entre $\{1,\dots,n\}$ para realizar a atualização, vemos que CD tem um desempenho melhor em 4 das 6 instâncias de teste, perdendo apenas nas instâncias `SC1` e `SR19`. Mesmo assim, no pior dos casos, `SC1`, CD foi pouco mais de duas vezes mais lento que GD. Por outro lado, vemos que GD demorou em torno de 6 vezes mais que CD em `SR10` e quase 25 vezes mais em `SC21`. Esses resultados indicam que, no caso em que a matriz $A$ é esparsa, o método do gradiente coordenado pode se sair muito melhor do que o método do gradiente clássico, desde que seja feita uma implementação cuidadosa.
+
+Agora, ao considerar os outros métodos coordenados, cíclico (CCD) e permutado (PCD), a abordagem aleatória (CD) já não se mostra tão dominante. Pelo contrário, plotando apenas CD e CCD, vemos o método cíclico ganhar em 4 das 6 instâncias. Em duas delas, CD foi menos de duas vezes mais lento que CCD e, no pior dos casos, demorou em torno de 8 vezes mais. Porém, existe uma instância em que a abordagem cíclica resulta em um gasto de tempo 32 vezes maior, indicando que se deve tomar cuidado e atentar ao problema específico antes de aplicar esse método.
+
+Na comparação com o método permutado, CD se mostrou nitidamente inferior. Demorou mais que PCD em 5 das 6 instâncias e, na que ganhou, foi mais rápido por um fator menor que $2^{0.2}$. Mesmo assim, no pior dos casos, perdeu por um fator menor que $2^{0.8}$. Então, embora PCD possa ser apontado como superior, a diferença entre eles não foi tão grande quanto algumas que vimos nas comparações anteriores.
+
+Ao comparar apenas CCD e PCD, vemos que cada um desses métodos ganha em metade das instâncias e, a menos de uma instância em que CCD é mais de 32 vezes mais lento, o gráfico mostra equilíbrio entre os métodos.
+
+Talvez não surpreendentemente, tendo em vista a análise até aqui, plotando todos os métodos vemos que o método do gradiente clássico (GD) não é o mais rápido em nenhuma das instâncias, tendo a pior performance entre eles. Também o método do descenso coordenado original (CD) não é o melhor método em nenhuma das instâncias. Os outros métodos coordenados, CCD e PCD, se alternam nesse posto, cada um, em metade delas. Mesmo assim, no geral, CD ainda é competitivo em relação aos outros, como sugere o gráfico "embolado" na parte superior. O método do gradiente permutado é o que apresenta a menor variação entre eles, no sentido de que, no pior dos casos, demora pouco mais de 4 vezes mais do que o melhor método. Já o método do gradiente cíclico pode ser mais de 32 vezes mais lento que o melhor, a depender da instância.
 """
 
 # ╔═╡ d97e95cc-f895-4521-b23a-f7a9267f54a9
@@ -274,13 +284,13 @@ tests_list = [file => file[begin:end-8] for file = readdir(path)];
 
 # ╔═╡ 4f87749a-297f-4710-a3ab-5aa341adbbba
 md"""
-O problema de interesse é de *ridge regression*, em que é minimizado uma função $f:\mathbb{R}^n\to\mathbb{R}$ que envolve um termo quadrático mais uma regularização com a norma $\ell_2$ que induz soluções pequenas. O problema é caracterizado por
+O problema de interesse é de *ridge regression*, em que é minimizada uma função $f:\mathbb{R}^n\to\mathbb{R}$ que envolve um termo quadrático mais uma regularização com a norma $\ell_2$, que induz soluções pequenas. O problema é caracterizado por
 
 $$\min_{x\in\mathbb{R}^n}f(x)=\min_{x\in\mathbb{R}^n}\frac{1}{2}\|Ax-b\|^2+\frac{\gamma}{2}\|x\|^2,$$
 
-em que $A\in\mathbb{R}^{m\times n}$, $b\in\mathbb{R}^m$, e $\gamma>0$ é o parâmetro de penalização.
+em que $A\in\mathbb{R}^{m\times n}$, $b\in\mathbb{R}^m$ e $\gamma>0$ é o parâmetro de penalização.
 
-Para ler os dados, é definida a função `read_mat` abaixo que usa `matread` e depois retorna os parâmetros do problema. Os dados também incluem $L=\lambda_{max}(A'A)+1$, a constante de $L$-suavidade do problema, $L_{max}$, a constante de suavidade máxima por coordenada, e $f_{target}$, o valor objetivo usado para o critério de parada $f(x^k)\leq f_{target}$.
+Para ler os dados, é definida a função `read_mat` abaixo que usa `matread` e depois retorna os parâmetros do problema. Os dados também incluem $L=\lambda_{max}(A'A)+\gamma$, a constante de $L$-suavidade do problema, $L_{max}$, a constante de suavidade máxima por coordenada, e $f_{target}$, o valor objetivo usado para o critério de parada $f(x^k)\leq f_{target}$.
 
 Selecione o nome da instância de teste: `test =` $(@bind test Select(tests_list)).
 """
