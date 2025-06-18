@@ -52,9 +52,9 @@ function read_mat(path, test)
 	A, ftarget, b, γ, L, Lₘₐₓ = getindex.(Ref(test_dict), ["A", "ftarget", "b", "gamma", "L", "Lmax"])
 	b = vec(b) # Transforma b de Array{, 2}(n,1) para Vector{}(n,)
 
-	@info "Variáveis do teste $(test):" A=summary(A) ftarget=ftarget b=summary(b) γ=γ L=L Lₘₐₓ=Lₘₐₓ
+	@info "Variáveis do teste $(test):" A=summary(A) ftarget=ftarget b=summary(b) γ=γ L=L Lₘₐₓ=Lₘₐₓ+γ
 
-	return A, ftarget, b, γ, L, Lₘₐₓ
+	return A, ftarget, b, γ, L, Lₘₐₓ+γ
 end;
 
 # ╔═╡ 90124009-b5c1-45df-a7c8-b5fe334fb10e
@@ -258,7 +258,7 @@ O laço abaixo executa todos os métodos para cada problema teste e salva o temp
 # ╔═╡ 1b2d7942-6eb8-4c39-8efe-1ee7fe4cd1a7
 md"""
 ### Análise dos resultados
-A análise a seguir deve ser interpretada tendo em perspectiva que dois dos métodos investigados utilizam aleatoridade na seleção das coordenadas a serem atualizadas. Portanto, as colocações dos métodos podem variar ligeiramente de uma execução para outra.
+A análise a seguir deve ser interpretada tendo em perspectiva que dois dos métodos investigados utilizam aleatoriedade na seleção das coordenadas a serem atualizadas. Portanto, as colocações dos métodos podem variar ligeiramente de uma execução para outra.
 
 Ao comparar no perfil de desempenho apenas o método do gradiente (GD) com o método do descenso coordenado original (CD), ou seja, o que escolhe um índice aleatoriamente entre $\{1,\dots,n\}$ para realizar a atualização, vemos que o CD tem um desempenho melhor em 4 das 6 instâncias de teste, perdendo apenas nas instâncias `SC1` e `SR19`. Mesmo assim, no pior dos casos, `SC1`, CD foi pouco mais de duas vezes mais lento que GD. Por outro lado, vemos que GD demorou em torno de 6 vezes mais que CD em `SR10` e quase 25 vezes mais em `SC21`. Esses resultados indicam que, em média, o método do gradiente coordenado é uma alternativa superior ao método do gradiente clássico para esse conjunto de problemas, desde que seja feita uma implementação cuidadosa para se aproveitar da esparsidade de $A$.
 
@@ -1782,7 +1782,7 @@ version = "1.8.1+0"
 # ╠═05446cb9-b59f-475a-ab51-e883d3576c53
 # ╟─353b5f5f-91e1-448f-84e0-118d6e2b8dcc
 # ╠═3242e3ea-90f5-4e71-9cbe-f7b3788168df
-# ╟─649cfa2b-da5f-42c4-9063-1f173141b3e4
+# ╠═649cfa2b-da5f-42c4-9063-1f173141b3e4
 # ╟─f3217d91-76c4-4b3d-8599-5b8d3e126058
 # ╠═4313ab4f-8035-4229-a9ce-d6c3427e8334
 # ╠═48c67201-e79a-4719-aba3-ec94547cd3c8
@@ -1791,13 +1791,13 @@ version = "1.8.1+0"
 # ╠═0b31cf03-90ee-43ca-a76e-e5e0d128e362
 # ╟─bea1425c-33a9-428e-b6a2-da4390fd70c0
 # ╠═5b12f767-fc85-4f48-a50d-73ddcc77b6c1
-# ╟─4887df3c-5539-45b9-b4eb-759ae4d80916
+# ╠═4887df3c-5539-45b9-b4eb-759ae4d80916
 # ╟─9b0be7dd-a578-4e35-afcc-5f02111e7b41
 # ╠═8dda73a0-f0e6-4452-924c-09d40a731ddf
 # ╟─edfa378d-097d-437f-bda3-9d6f09751f31
 # ╠═6da4145f-668a-4ed2-a2d6-051fa854ac0e
 # ╟─7367fac3-2979-4f17-8f2f-8acb75780491
-# ╟─3df8870b-f084-487b-9a24-6da45887543f
+# ╠═3df8870b-f084-487b-9a24-6da45887543f
 # ╟─1b2d7942-6eb8-4c39-8efe-1ee7fe4cd1a7
 # ╟─d97e95cc-f895-4521-b23a-f7a9267f54a9
 # ╠═9f4351d7-9b4f-429c-83f2-056458683b88
