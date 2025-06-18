@@ -63,7 +63,7 @@ md"""
 
 O parâmetro `kₘₐₓ =` $(@bind kₘₐₓ NumberField(100:100:10000; default = 10000)) determina o número máximo de iterações para o método do gradiente.  
 
-Já para o método do descenso coordenado, como $n$ iterações equivalem em média a uma iteração do gradiente, tomamos `n⋅kₘₐₓ` como número máximo de iterações.
+Já para o método do descenso coordenado, como $n$ iterações equivalem em média a uma iteração do gradiente, tomamos `n⋅kₘₐₓ` como número máximo de atualizações de coordenada.
 
 O iterado inicial $x^0$ foi tomado como a origem, e também é calculado o resíduo inicial $r^0$ (veja ($\text{r}$)).
 """
@@ -151,8 +151,8 @@ md"""
 ### Método do descenso coordenado
 O descenso coordenado é efetuado pela função `CD!`, que recebe o iterado inicial e o resíduo inicial. A cada iteração é dado o passo
 
-$$x^{k+1}_{i_k}=x^k_{i_k}-\frac{\nabla_{i_k} f(x^k)}{L_{max}}\tag{CD}$$
-na coordenada $i_k$ escolhida na iteração $k$. Os critérios de parada só são conferidos a cada $n$ iterações do método, o que é efetuado com um laço `for` dentro de cada iteração.
+$$x^{k+1}_{i_k}=x^k_{i_k}-\frac{\nabla_{i_k} f(x^k)}{L_{max}}\tag{CD}.$$
+Cada uma dessas iterações custa, aproximadamente, $n$ vezes menos que uma iteração do método do gradiente, que atualiza todas as coordenadas de uma vez. Por isso, para fins de comparação, vamos nos referir a cada lote de $n$ atualizações de coordenadas como uma única iteração do método do descenso coordenado. Dessa maneira, o critério de parada só é checado a cada $n$ atualizações de coordenadas. No código a seguir, essas atualizações são efetuadas dentro de um laço `for` executado em cada iteração $k$.
 
 Também definimos abaixo a função que retorna os índices que serão usados pelo descenso coordenado por $n$ iterações internas. Na versão original do método, esses índices são escolhidos de forma randômica no *range* `1:n` de todos os possíveis índices.
 """
@@ -194,20 +194,17 @@ end;
 
 # ╔═╡ ae3a2487-41f8-4355-b460-3368930f073b
 md"""
-Pela atualização ($\text{CD}$), o resíduo na iteração $k+1$ pode ser atualizado através da realação
+Pela atualização ($\text{CD}$), o resíduo na iteração $k+1$ pode ser obtido através da realação
 
-$$r^{k+1} = Ax^{k+1} - b = A(x^k  -\frac{\nabla_{i_k} f(x^k)}{L_{max}} e_{i_k}) - b. $$
-Assim,
+$$r^{k+1} = Ax^{k+1} - b = A\left(x^k  -\frac{\nabla_{i_k} f(x^k)}{L_{max}} e_{i_k}\right) - b= r^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} A e_{i_k} = r^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} A_{\cdot,i_k},$$
+em que $A_{\cdot,i_k}$ é $i_k $-ésima coluna de $A$. Desse modo, só é preciso atualizar as componentes do resíduo correspondentes às entradas não nulas de $A_{\cdot, i_k}$, uma vez que ela é esparsa.
 
-$$r^{k+1} = A(x^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} e_{i_k}) - b = r^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} A e_{i_k} = r^k -\frac{\nabla_{i_k} f(x^k)}{L_{max}} A_{\cdot,i_k},$$
-em que $A_{\cdot,i_k}$ é $i_k $-ésima coluna de $A$. 
-
-Para implementar essa atualização de forma eficiente, é necessário se aproveitar da estrutura de armazenamento da matriz esparsa por colunas $A$ (`SparseMatrixCSC`). O *range* ` A.colptr[i]:A.colptr[i+1]-1` contém os índices em `A.rowval` e `A.nzval` referentes aos elementos da coluna $A_{\cdot,i}$. Já `A.nzval` contém os valores das entradas da matriz, e `A.rowval` a linha na qual esses elementos se encontram. Dessa forma, atualizamos a coordenada `A.rowval[j]` de $r^k$ com o valor `A.nzval[j]` para todo `j` em ` A.colptr[i]:A.colptr[i+1]-1`.
+Para se aproveitar da estrutura esparsa da matriz $A$ e implementar de forma eficiente a atualização do resíduo é preciso entender o formato CSC (*Compressed Sparse Column*) em que a matriz está armazenada. O *range* ` A.colptr[i]:A.colptr[i+1]-1`s contém os índices de `A.nzval` e `A.rowval` referentes a $i$-ésima coluna de $A$. Para cada $j$ nesse *range*, os valores não nulos nessa coluna podem ser acessados através de `A.nzval[j]`. Já `A.rowval[j]` é o índice da linha na qual `A.nzval[j]` se encontra. Dessa forma, atualizamos a coordenada `A.rowval[j]` de $r^k$ com o valor `A.nzval[j]` para todo `j` em ` A.colptr[i]:A.colptr[i+1]-1`.
 
 Além disso, como 
 
 $$\nabla_{i_k} f(x^k)=A_{\cdot,i_k}'r^k+\gamma x_{i_k},$$
-a $i_k$-ésima coornada do gradiente também pode ser implementada de forma eficiente ao transformar o produto $A_{\cdot,i_k}'r^k$ em outro laço `for` em ` A.colptr[i]:A.colptr[i+1]-1`, se aproveitando novamente da esparsidade de $A_{\cdot,i_k}$.
+a $i_k$-ésima componente do gradiente também pode ser implementada de forma eficiente ao transformar o produto $A_{\cdot,i_k}'r^k$ em outro laço `for` em ` A.colptr[i]:A.colptr[i+1]-1`, se aproveitando novamente da esparsidade de $A_{\cdot,i_k}.$
 """
 
 # ╔═╡ fbd8c4bc-edb7-4dfe-aae9-e66074522bf6
@@ -241,8 +238,7 @@ A seguir está o *benchmark* desse método aplicado ao problema selecionado e o 
 # ╔═╡ 9b0be7dd-a578-4e35-afcc-5f02111e7b41
 md"""
 ### Comparação entre os métodos
-
-Para o perfil de desempenho e análise dos métodos, também serão testadas duas outras versões de descenso coordenado: o cíclico e o permutado. A versão cíclica escolhe os índices para atualização seguindo a ordem cardinal. Já a versão permutada escolhe os índices a partir de uma pertmutação de $\{1,2,..., n\}$. As funções para gerar os índices estão definidas abaixo.
+Para o perfil de desempenho e análise dos métodos, também serão testadas duas outras versões de descenso coordenado: o cíclico e o permutado. A versão cíclica escolhe os índices para atualização seguindo a ordem cardinal. Já a versão permutada escolhe os índices a partir de uma pertmutação aleatória de $\{1,2,..., n\}$. Note que isso é diferente da versão original, já que não permite repetições de índices dentro de uma iteração. As funções para gerar os índices estão definidas abaixo.
 """
 
 # ╔═╡ 8dda73a0-f0e6-4452-924c-09d40a731ddf
@@ -262,6 +258,17 @@ O laço abaixo executa todos os métodos para cada problema teste e salva o temp
 # ╔═╡ 1b2d7942-6eb8-4c39-8efe-1ee7fe4cd1a7
 md"""
 ### Análise dos resultados
+A análise a seguir deve ser interpretada tendo em perspectiva que dois dos métodos investigados utilizam aleatoridade na seleção das coordenadas a serem atualizadas. Portanto, as colocações dos métodos podem variar ligeiramente de uma execução para outra.
+
+Ao comparar no perfil de desempenho apenas o método do gradiente (GD) com o método do descenso coordenado original (CD), ou seja, o que escolhe um índice aleatoriamente entre $\{1,\dots,n\}$ para realizar a atualização, vemos que o CD tem um desempenho melhor em 4 das 6 instâncias de teste, perdendo apenas nas instâncias `SC1` e `SR19`. Mesmo assim, no pior dos casos, `SC1`, CD foi pouco mais de duas vezes mais lento que GD. Por outro lado, vemos que GD demorou em torno de 6 vezes mais que CD em `SR10` e quase 25 vezes mais em `SC21`. Esses resultados indicam que, em média, o método do gradiente coordenado é uma alternativa superior ao método do gradiente clássico para esse conjunto de problemas, desde que seja feita uma implementação cuidadosa para se aproveitar da esparsidade de $A$.
+
+Comparando agora as demais estratégias coordenadas, cíclica (CCD) e permutada (PCD), com a abordagem aleatória CD, alguns fenômenos são obervados. Primeiramente, considerando apenas CD e CCD, vemos o método cíclico ganhar em 4 das 6 instâncias. Em duas delas, CD foi menos de duas vezes mais lento que CCD e, no pior dos casos, demorou em torno de 8 vezes mais. A vantagem do CCD nesses problemas possivelmente se deve ao fato dessa estratégia não repetir índices durante uma iteração, garantindo que cada coordenada seja atualizada e acelerando o método. Porém, existe uma instância em que a abordagem cíclica resulta em um gasto de tempo cerca de 32 vezes maior. Esse resultado condiz com a teoria sobre o método cíclico, uma vez que, apesar de taxas semelhantes de convergência em comparação ao CD \cite{}, o CDD possui uma taxa de convergência de pior caso muito alta \cite{}. É justamente para evitar esses piores casos da estratégia cíclica que elementos aleatórios são empregados na seleção de índices.
+
+Na comparação com o método permutado, CD se mostrou nitidamente inferior, pois demorou mais que o PCD em 5 das 6 instâncias e, na que ganhou, foi mais rápido por um fator em torno de apenas $2^{0.2}$. Mesmo assim, no pior dos casos, perdeu por um fator próximo de apenas $2^{0.8}$. Portanto, embora o PCD possa ser apontado como superior, a diferença entre esses métodos não foi tão significativa quanto nas demais comparações. A ideia por trás de usar permutações ao invés de índices completamente aleatórios é, como já mencionado, garantir que cada coordenada seja atualizada em uma iteração, o que pode ser a explicação dessa leve superioridade.  
+
+Ao comparar apenas o CCD e o PCD, vemos que cada um desses métodos ganha em metade das instâncias e, a menos de uma instância em que o CCD é mais de 32 vezes mais lento, o perfil de desempenho mostra um certo equilíbrio entre eles. Apesar de mais lenta em algumas instâncias, o PCD, assim como o CD, evita convergências extremamente lentas em problemas específicos características do método CCD. Além disso, o PCD ganha ligeiramente do CD em média. Dessa forma, concluí-se que,  dentre todas as estratégias de seleção de índices testadas, a mais recomendada para um problema qualquer desse tipo foi a permutada. Contudo, se existe alguma garantia teórica ou prática de que o CCD não se comportará mal para um dado conjunto de problemas, essa estratégia pode ser uma escolha viável. 
+
+Comparando todos os métodos simultaneamente, vemos uma clara superioridade de todos os métodos coordenados em relação ao GD, demonstrando a eficácia de atualizações componente a componente para a classe de problemas testados. O PCD é o que apresenta a menor variância entre eles, no sentido de que, no pior dos casos, demora pouco mais de 4 vezes mais do que o melhor método. Já o método do gradiente cíclico pode ser mais de 32 vezes mais lento que o melhor, a depender da instância, confirmando os resultados anteriores sobre a seleção de índices.
 """
 
 # ╔═╡ d97e95cc-f895-4521-b23a-f7a9267f54a9
