@@ -74,7 +74,7 @@ md"""
 O gradiente descendente é efetuado pela função `GD!`, que recebe o iterado inicial e o resíduo inicial. A cada iteração é dado o passo
 
 $$x^{k+1}=x^k-\frac{1}{L}\nabla f(x^k)$$
-e conferidos os critérios de parada do valor objetivo desejado e do número máximo de iterações (`fx ≤ ftarget` e `k ≥ kₘₐₓ`).
+e são conferidos os critérios de parada do valor objetivo desejado e do número máximo de iterações (`fx ≤ ftarget` e `k ≥ kₘₐₓ`).
 """
 
 # ╔═╡ e96cba24-d34e-49d8-9d89-bcb3074578f6
@@ -149,12 +149,12 @@ A seguir está o *benchmark* desse método aplicado ao problema selecionado e o 
 # ╔═╡ f3217d91-76c4-4b3d-8599-5b8d3e126058
 md"""
 ### Método do descenso coordenado
-O descenso coordenado é efetuado pela função `CD!`, que recebe o iterado inicial e o resíduo inicial. A cada iteração é dado o passo
+O descenso coordenado é efetuado pela função `CD!`, que recebe o iterado inicial e o resíduo inicial. Na iteração $k$, é escolhida uma coordenada $i_k$ e é dado o passo
 
 $$x^{k+1}_{i_k}=x^k_{i_k}-\frac{\nabla_{i_k} f(x^k)}{L_{max}}\tag{CD}.$$
 Cada uma dessas iterações custa, aproximadamente, $n$ vezes menos que uma iteração do método do gradiente, que atualiza todas as coordenadas de uma vez. Por isso, para fins de comparação, vamos nos referir a cada lote de $n$ atualizações de coordenadas como uma única iteração do método do descenso coordenado. Dessa maneira, o critério de parada só é checado a cada $n$ atualizações de coordenadas. No código a seguir, essas atualizações são efetuadas dentro de um laço `for` executado em cada iteração $k$.
 
-Também definimos abaixo a função que retorna os índices que serão usados pelo descenso coordenado por $n$ iterações internas. Na versão original do método, esses índices são escolhidos de forma randômica no *range* `1:n` de todos os possíveis índices.
+Também definimos abaixo a função que retorna os índices que serão usados pelo descenso coordenado nas $n$ iterações internas. Na versão original do método, esses índices são escolhidos de forma aleatória no *range* `1:n` de todos os possíveis índices.
 """
 
 # ╔═╡ 4313ab4f-8035-4229-a9ce-d6c3427e8334
@@ -232,7 +232,7 @@ end;
 
 # ╔═╡ bea1425c-33a9-428e-b6a2-da4390fd70c0
 md"""
-A seguir está o *benchmark* desse método aplicado ao problema selecionado e o gráfico de $f(x^k)$ a cada iteração. Em todos os problemas teste, o número de iterações totais do descenso coordenado é menor que o do método do gradiente. Isso provavelmente se dá pelo maior tamanho de passo tomado ($L_{max}\leq L$) e também pela sua natureza coordenada. Analogamente ao método de Gauss-Seidel em comparação ao de Jacobi, ao invés de tomar um passo com o gradiente inteiro, o método coordenado efetua uma atualização em uma coordenada antes de calcular a próxima componente do gradiente. Assim, os passos são sempre tomados com um gradiente que melhor reflete o novo estado do iterado, prossivelmente acelerando a convergência.
+A seguir está o *benchmark* desse método aplicado ao problema selecionado e o gráfico de $f(x^k)$ a cada iteração. Em todos os problemas teste, o número de iterações totais do descenso coordenado (lembrando que cada uma equivale a $n$ atualizações de coordenadas) é menor que o do método do gradiente. Isso provavelmente se dá pelo maior tamanho de passo tomado ($L_{max}\leq L$) e também pela sua natureza coordenada. Analogamente ao método de Gauss-Seidel em comparação ao de Jacobi, ao invés de tomar um passo com o gradiente inteiro, o método coordenado efetua uma atualização em uma coordenada antes de calcular a próxima componente do gradiente. Assim, os passos são sempre tomados com um gradiente que melhor reflete o novo estado do iterado, prossivelmente acelerando a convergência.
 """
 
 # ╔═╡ 9b0be7dd-a578-4e35-afcc-5f02111e7b41
@@ -281,13 +281,13 @@ tests_list = [file => file[begin:end-8] for file = readdir(path)];
 
 # ╔═╡ 4f87749a-297f-4710-a3ab-5aa341adbbba
 md"""
-O problema de interesse é de *ridge regression*, em que é minimizado uma função $f:\mathbb{R}^n\to\mathbb{R}$ que envolve um termo quadrático mais uma regularização com a norma $\ell_2$ que induz soluções pequenas. O problema é caracterizado por
+O problema de interesse é de *ridge regression*, em que é minimizada uma função $f:\mathbb{R}^n\to\mathbb{R}$ que envolve um termo quadrático mais uma regularização com a norma $\ell_2$, que induz soluções pequenas. O problema é caracterizado por
 
 $$\min_{x\in\mathbb{R}^n}f(x)=\min_{x\in\mathbb{R}^n}\frac{1}{2}\|Ax-b\|^2+\frac{\gamma}{2}\|x\|^2,$$
 
-em que $A\in\mathbb{R}^{m\times n}$, $b\in\mathbb{R}^m$, e $\gamma>0$ é o parâmetro de penalização.
+em que $A\in\mathbb{R}^{m\times n}$, $b\in\mathbb{R}^m$ e $\gamma>0$ é o parâmetro de penalização.
 
-Para ler os dados, é definida a função `read_mat` abaixo que usa `matread` e depois retorna os parâmetros do problema. Os dados também incluem $L=\lambda_{max}(A'A)+1$, a constante de $L$-suavidade do problema, $L_{max}$, a constante de suavidade máxima por coordenada, e $f_{target}$, o valor objetivo usado para o critério de parada $f(x^k)\leq f_{target}$.
+Para ler os dados, é definida a função `read_mat` abaixo que usa `matread` e depois retorna os parâmetros do problema. Os dados também incluem $L=\lambda_{max}(A'A)+\gamma$, a constante de $L$-suavidade do problema, $L_{max}$, a constante de suavidade máxima por coordenada, e $f_{target}$, o valor objetivo usado para o critério de parada $f(x^k)\leq f_{target}$.
 
 Selecione o nome da instância de teste: `test =` $(@bind test Select(tests_list)).
 """
